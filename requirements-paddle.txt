@@ -1,0 +1,3 @@
+# Optional primary OCR engine.
+# Install a platform-compatible PaddlePaddle build first, then:
+paddleocr>=3.0,<4

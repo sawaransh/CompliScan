@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>CompliScan — Legal Metrology Inspection</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+<div id="device">
+
+  <div class="app-body" id="app-body">
+
+    <!-- ============ LOGIN ============ -->
+    <section class="screen screen-login" id="screen-login">
+      <div class="screen-content">
+        <div class="login-brand">
+          <div class="login-mark">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none"><path d="M12 2 4 5v6c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V5l-8-3Z" stroke="white" stroke-width="1.8" stroke-linejoin="round"/><path d="m8.5 12 2.3 2.3L16 9.3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <h1>CompliScan</h1>
+          <p>Scan. Verify. Ensure fair trade.</p>
+        </div>
+
+        <form id="login-form">
+          <div class="field">
+            <label for="li-id">Officer ID</label>
+            <input id="li-id" placeholder="e.g. OFF1234" autocomplete="off" required>
+          </div>
+          <div class="field">
+            <label for="li-name">Full name</label>
+            <input id="li-name" placeholder="e.g. R. Sharma" autocomplete="off" required>
+          </div>
+          <div class="field">
+            <label for="li-dept">Department</label>
+            <input id="li-dept" placeholder="Legal Metrology Department" value="Legal Metrology Department">
+          </div>
+          <button type="submit" class="btn btn-primary">Login</button>
+        </form>
+
+        <div class="divider-row">or</div>
+        <button class="btn btn-outline" id="btn-govt-id">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.7"/><circle cx="9" cy="10.5" r="2.2" stroke="currentColor" stroke-width="1.6"/><path d="M5.5 17c.7-2 2.3-3 3.5-3s2.8 1 3.5 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M14.5 9h4M14.5 12h4M14.5 15h2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          Continue with Government ID
+        </button>
+
+        <div class="login-foot">
+          <button type="button" id="btn-offline">Use offline mode</button>
+        </div>
+        <div class="gov-tag">Department of Consumer Affairs<br>Government of India</div>
+      </div>
+    </section>
+
+    <!-- ============ HOME ============ -->
+    <section class="screen with-tabbar" id="screen-home">
+      <div class="screen-header">
+        <div class="header-spacer"></div>
+        <button class="icon-btn" id="home-profile-btn" aria-label="Profile">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.4" stroke="currentColor" stroke-width="1.7"/><path d="M5 19.5c1.2-3.4 4-5 7-5s5.8 1.6 7 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="screen-content">
+        <div class="hello-block">
+          <div class="eyebrow" id="home-greeting">Hello, Officer!</div>
+          <h1>Let's keep the market fair today.</h1>
+        </div>
+
+        <div class="scan-cta" id="home-scan-cta">
+          <div class="sc-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 8V6a2 2 0 0 1 2-2h2M4 16v2a2 2 0 0 0 2 2h2M20 8V6a2 2 0 0 0-2-2h-2M20 16v2a2 2 0 0 1-2 2h-2" stroke="white" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="3.2" stroke="white" stroke-width="1.8"/></svg>
+          </div>
+          <div>
+            <div class="sc-title">Scan a product</div>
+            <div class="sc-sub">Start a new inspection</div>
+          </div>
+          <svg class="sc-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="m9 6 6 6-6 6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+
+        <div class="quick-actions">
+          <button class="qa-btn" id="qa-history">
+            <div class="qa-icon blue"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 1 0 3-6.7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M3 4v5h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+            <div class="qa-title">View history</div>
+            <div class="qa-sub">Past inspections</div>
+          </button>
+          <button class="qa-btn" id="qa-reports">
+            <div class="qa-icon violet"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M14 3v5h5" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 13h6M9 16.5h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+            <div class="qa-title">Reports</div>
+            <div class="qa-sub">View &amp; export</div>
+          </button>
+        </div>
+
+        <div class="section-title">Quick stats (this month)</div>
+        <div class="stats-row">
+          <div class="stat-tile"><b id="stat-scans">0</b><span>Scans</span></div>
+          <div class="stat-tile flag"><b id="stat-flagged">0</b><span>Flagged</span></div>
+          <div class="stat-tile pend"><b id="stat-pending">0</b><span>Pending</span></div>
+        </div>
+
+        <div class="section-title">Recent inspections</div>
+        <div class="card" id="home-recent-card" style="padding: 6px 12px;">
+          <div class="empty-note" id="home-recent-empty">No inspections yet. Start your first scan above.</div>
+          <div id="home-recent-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ CAPTURE ============ -->
+    <section class="screen" id="screen-capture">
+      <div class="screen-header">
+        <button class="icon-btn" id="capture-back" aria-label="Back">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="m15 5-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <h1>Capture product</h1>
+      </div>
+      <div class="screen-content">
+        <div class="capture-hint">Capture clear images of all visible sides for the most accurate analysis.</div>
+
+        <div class="capture-grid" id="capture-grid"></div>
+
+        <div class="extra-shots">
+          <div class="section-title">Additional angles (optional)</div>
+          <div class="extra-shots-list" id="extra-shots-list">
+            <label class="add-shot-tile">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              <input type="file" id="extra-shot-input" accept="image/*" capture="environment">
+            </label>
+          </div>
+        </div>
+
+        <div class="backend-row">
+          <span>OCR engine</span>
+          <select id="backend-select">
+            <option value="auto">Auto (Paddle → Tesseract → Mock)</option>
+            <option value="paddle">PaddleOCR</option>
+            <option value="tesseract">Tesseract</option>
+            <option value="mock">Mock demo</option>
+          </select>
+        </div>
+      </div>
+      <div class="capture-footer">
+        <div class="capture-count" id="capture-count">0 images captured</div>
+        <button class="btn btn-primary" id="btn-proceed-analysis" disabled>
+          Proceed to analysis
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m9 6 6 6-6 6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+    </section>
+
+    <!-- ============ ANALYZING ============ -->
+    <section class="screen screen-analyzing" id="screen-analyzing">
+      <div class="screen-content">
+        <div class="ring-wrap">
+          <svg width="168" height="168" viewBox="0 0 168 168">
+            <circle class="ring-bg" cx="84" cy="84" r="74"></circle>
+            <circle class="ring-fg" id="ring-fg" cx="84" cy="84" r="74" stroke-dasharray="464.9" stroke-dashoffset="464.9"></circle>
+          </svg>
+          <div class="ring-pct" id="ring-pct">0%</div>
+        </div>
+        <div class="analyzing-title">Analyzing product…</div>
+        <p class="analyzing-sub">Extracting text and checking compliance with Legal Metrology rules.</p>
+
+        <div class="step-list" id="analyzing-steps"></div>
+
+        <div class="analyzing-note">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v.01M12 11v5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <span>This usually takes 5–10 seconds. Please keep the app open.</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ RESULT ============ -->
+    <section class="screen" id="screen-result">
+      <div class="screen-header">
+        <button class="icon-btn" id="result-back" aria-label="Back">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="m15 5-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <h1>Inspection result</h1>
+      </div>
+      <div class="screen-content">
+
+        <div class="result-hero" id="result-hero">
+          <div class="result-hero-top">
+            <div>
+              <div class="result-hero-label">Overall status</div>
+              <div class="result-hero-status" id="result-hero-status">—</div>
+            </div>
+            <div class="result-hero-badge" id="result-hero-badge"></div>
+          </div>
+          <div class="result-hero-meta" id="result-hero-meta">—</div>
+        </div>
+
+        <div class="card product-card" style="margin-top:14px;">
+          <div class="product-thumb">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M20 8.5 12 4 4 8.5v7L12 20l8-4.5v-7Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M4 8.5 12 13l8-4.5M12 13v7" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+          </div>
+          <div>
+            <div class="product-name" id="result-product-name">Product</div>
+            <div class="product-sub" id="result-product-sub">—</div>
+          </div>
+        </div>
+
+        <div class="findings-row">
+          <div class="finding-tile ok"><b id="find-pass">0</b><span>Compliant</span></div>
+          <div class="finding-tile bad"><b id="find-fail">0</b><span>Violations</span></div>
+          <div class="finding-tile warn"><b id="find-review">0</b><span>Needs review</span></div>
+        </div>
+
+        <div id="result-conflicts"></div>
+
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="summary">Summary</button>
+          <button class="tab-btn" data-tab="details">Details</button>
+          <button class="tab-btn" data-tab="evidence">Evidence</button>
+        </div>
+
+        <div class="tab-panel active" id="tab-summary">
+          <div class="card" id="checks-list" style="padding:6px 12px;"></div>
+        </div>
+        <div class="tab-panel" id="tab-details">
+          <div class="card" id="fields-list" style="padding:6px 12px;"></div>
+        </div>
+        <div class="tab-panel" id="tab-evidence">
+          <div class="evidence-grid" id="evidence-list"></div>
+        </div>
+
+        <div class="card" style="margin-top:14px; font-size:11.5px; color:var(--muted);" id="result-disclaimer"></div>
+      </div>
+      <div class="sticky-cta">
+        <button class="btn btn-primary" id="btn-generate-report">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" stroke="white" stroke-width="1.7" stroke-linejoin="round"/><path d="M14 3v5h5" stroke="white" stroke-width="1.7" stroke-linejoin="round"/></svg>
+          Generate report
+        </button>
+      </div>
+    </section>
+
+    <!-- ============ REPORT ============ -->
+    <section class="screen" id="screen-report">
+      <div class="screen-header">
+        <button class="icon-btn" id="report-back" aria-label="Back">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="m15 5-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <h1>Report preview</h1>
+        <div class="header-spacer"></div>
+        <button class="icon-btn" id="report-share" aria-label="Share">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M12 15V3m0 0 4 4m-4-4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="screen-content">
+        <div class="report-doc">
+          <div class="report-doc-head">
+            <div class="rd-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2 4 5v6c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V5l-8-3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+            </div>
+            <h2>Legal Metrology<br>Inspection Report</h2>
+          </div>
+          <div class="report-kv"><span class="k">Inspection ID</span><span class="v" id="rp-id">—</span></div>
+          <div class="report-kv"><span class="k">Date &amp; time</span><span class="v" id="rp-date">—</span></div>
+          <div class="report-kv"><span class="k">Location</span><span class="v" id="rp-location">—</span></div>
+          <div class="report-kv"><span class="k">Product</span><span class="v" id="rp-product">—</span></div>
+          <div class="report-kv"><span class="k">Manufacturer</span><span class="v" id="rp-manufacturer">—</span></div>
+          <div class="report-kv"><span class="k">Inspecting officer</span><span class="v" id="rp-officer">—</span></div>
+          <div class="report-kv"><span class="k">Status</span><span class="v" id="rp-status">—</span></div>
+        </div>
+
+        <div class="section-title">Findings</div>
+        <div class="findings-row">
+          <div class="finding-tile ok"><b id="rp-pass">0</b><span>Compliant</span></div>
+          <div class="finding-tile bad"><b id="rp-fail">0</b><span>Violations</span></div>
+          <div class="finding-tile warn"><b id="rp-review">0</b><span>Needs review</span></div>
+        </div>
+
+        <div class="report-actions">
+          <button class="btn btn-primary" id="btn-download-pdf">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0 4-4m-4 4-4-4" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>
+            Download PDF
+          </button>
+          <button class="btn btn-outline" id="btn-submit-supervisor">Submit to supervisor</button>
+        </div>
+        <div class="submit-note" id="rp-submit-note"></div>
+      </div>
+    </section>
+
+    <!-- ============ HISTORY ============ -->
+    <section class="screen with-tabbar" id="screen-history">
+      <div class="screen-header">
+        <h1>Scan history</h1>
+        <div class="header-spacer"></div>
+        <button class="icon-btn" id="history-clear" aria-label="Clear history">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-8 0 .8 12a1 1 0 0 0 1 1h4.4a1 1 0 0 0 1-1L15 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+      <div class="screen-content">
+        <div class="filter-row" id="history-filters">
+          <button class="filter-chip active" data-filter="all">All</button>
+          <button class="filter-chip" data-filter="COMPLIANT">Compliant</button>
+          <button class="filter-chip" data-filter="NON-COMPLIANT">Flagged</button>
+          <button class="filter-chip" data-filter="REVIEW">Needs review</button>
+        </div>
+        <div class="card" id="history-card" style="padding: 6px 12px;">
+          <div class="empty-note" id="history-empty">No scans yet.</div>
+          <div id="history-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ REPORTS ============ -->
+    <section class="screen with-tabbar" id="screen-reports">
+      <div class="screen-header">
+        <h1>Reports</h1>
+      </div>
+      <div class="screen-content">
+        <div class="capture-hint">Reports that have been generated and are ready to submit or download.</div>
+        <div class="card" id="reports-card" style="padding: 6px 12px;">
+          <div class="empty-note" id="reports-empty">No reports generated yet.</div>
+          <div id="reports-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PROFILE ============ -->
+    <section class="screen with-tabbar" id="screen-profile">
+      <div class="screen-header">
+        <h1>Profile</h1>
+      </div>
+      <div class="screen-content">
+        <div class="card">
+          <div class="profile-head">
+            <div class="profile-avatar" id="profile-avatar">O</div>
+            <div>
+              <div class="profile-name" id="profile-name">Officer</div>
+              <div class="profile-role" id="profile-role">Inspector</div>
+              <div class="profile-role" id="profile-dept">Legal Metrology Department</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-title">Account</div>
+        <div class="card" style="padding: 4px 12px;">
+          <button class="list-row" id="profile-sync">
+            <div class="lr-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 0 1 15.3-6.4M21 12a9 9 0 0 1-15.3 6.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M18 3v4h-4M6 21v-4h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div class="lr-text">Sync data<div class="lr-sub" id="profile-sync-time">Not synced yet</div></div>
+            <svg class="lr-chev" width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m9 6 6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="list-row" id="profile-settings">
+            <div class="lr-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14.2 3H9.8l-.4 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 2 1.2l.4 2.6h4.4l.4-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.07-.4.1-.8.1-1.2Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></div>
+            <div class="lr-text">Settings<div class="lr-sub">Default OCR engine, preferences</div></div>
+            <svg class="lr-chev" width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m9 6 6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="list-row" id="profile-help">
+            <div class="lr-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 1-1 1.7v.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12 17v.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+            <div class="lr-text">Help &amp; support</div>
+            <svg class="lr-chev" width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m9 6 6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+
+        <div class="section-title">Session</div>
+        <div class="card" style="padding: 4px 12px;">
+          <button class="list-row danger" id="profile-logout">
+            <div class="lr-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 17v1a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M9 12h11m0 0-3-3m3 3-3 3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div class="lr-text">Log out</div>
+          </button>
+        </div>
+        <div class="gov-tag" style="margin-top:20px;">CompliScan v1.0 (prototype)<br>A fair market builds a stronger India</div>
+      </div>
+    </section>
+
+  </div>
+
+  <nav class="tabbar" id="tabbar">
+    <button class="tab-item active" data-nav="home">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="m4 11 8-7 8 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Home
+    </button>
+    <button class="tab-item" data-nav="history">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 1 0 3-6.7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M3 4v5h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      History
+    </button>
+    <button class="tab-fab" id="tab-scan" aria-label="Scan product">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 8V6a2 2 0 0 1 2-2h2M4 16v2a2 2 0 0 0 2 2h2M20 8V6a2 2 0 0 0-2-2h-2M20 16v2a2 2 0 0 1-2 2h-2" stroke="white" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="3.2" stroke="white" stroke-width="1.8"/></svg>
+    </button>
+    <button class="tab-item" data-nav="reports">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M14 3v5h5" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+      Reports
+    </button>
+    <button class="tab-item" data-nav="profile">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.4" stroke="currentColor" stroke-width="1.8"/><path d="M5 19.5c1.2-3.4 4-5 7-5s5.8 1.6 7 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      Profile
+    </button>
+  </nav>
+
+  <div class="toast" id="toast"><span class="t-icon">●</span><span id="toast-text">Saved</span></div>
+
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

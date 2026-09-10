@@ -1,0 +1,15 @@
+{
+  "rule_set_id": "PCR-DEMO-SCAFFOLD",
+  "title": "Legal Metrology packaged-commodity prototype checklist",
+  "disclaimer": "Prototype scaffold only. Verify every requirement, threshold, exception and effective date against the current official Legal Metrology rules and applicable amendments before real enforcement use.",
+  "checks": [
+    {"id": "manufacturer", "label": "Manufacturer / packer / importer declaration", "required": true, "type": "text"},
+    {"id": "address", "label": "Manufacturer / packer / importer address", "required": true, "type": "text"},
+    {"id": "product_name", "label": "Product / generic name", "required": true, "type": "text"},
+    {"id": "net_quantity", "label": "Net quantity", "required": true, "type": "quantity"},
+    {"id": "mrp", "label": "MRP", "required": true, "type": "currency"},
+    {"id": "date", "label": "Month / year date declaration", "required": true, "type": "date"},
+    {"id": "consumer_care", "label": "Consumer-care contact details", "required": true, "type": "contact"},
+    {"id": "readability", "label": "Overall declaration readability", "required": true, "type": "visual"}
+  ]
+}

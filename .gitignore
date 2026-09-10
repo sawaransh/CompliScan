@@ -1,0 +1,42 @@
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Runtime-generated data (auto-created by app/config.py — do not commit uploads or scan results)
+data/uploads/
+data/runs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Environment / secrets
+.env
+.env.*
+*.db
+*.sqlite*
+*.log
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test / coverage caches
+.pytest_cache/
+.coverage
+htmlcov/
