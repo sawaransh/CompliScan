@@ -1,0 +1,12 @@
+fastapi==0.109.0
+uvicorn==0.27.0
+python-multipart==0.0.6
+paddleocr==2.7.3
+rapidocr_onnxruntime==1.4.4
+onnxruntime
+pillow-heif
+opencv-python
+numpy==1.26.3
+pillow>=11.3.0
+pydantic>=2.10.0
+pydantic-settings>=2.3.0

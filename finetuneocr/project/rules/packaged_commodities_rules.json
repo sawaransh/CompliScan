@@ -1,0 +1,82 @@
+{
+  "categories": {
+    "general_retail_packaged_commodity": {
+      "name": "General Retail Packaged Commodity",
+      "description": "Standard pre-packaged commodities sold in retail",
+      "applicable_rules": [
+        "PC-MRP-001",
+        "PC-QTY-001",
+        "PC-MFR-001",
+        "PC-DATE-001",
+        "PC-CARE-001"
+      ]
+    }
+  },
+  "rules": [
+    {
+      "rule_id": "PC-MRP-001",
+      "field": "mrp",
+      "requirement": "Maximum Retail Price (MRP) declaration must be detected on the package",
+      "severity": "high",
+      "legal_reference": "Rule 6(1)(d) of Legal Metrology (Packaged Commodities) Rules, 2011",
+      "validation": {
+        "type": "presence",
+        "pattern": "(?i)(mrp|maximum retail price|\\u20b9|rs\\.?|\\$)[\\s:]*[\\d,.]+",
+        "min_confidence": 0.7
+      }
+    },
+    {
+      "rule_id": "PC-QTY-001",
+      "field": "net_quantity",
+      "requirement": "Net quantity declaration must be detected on the package",
+      "severity": "high",
+      "legal_reference": "Rule 6(1)(b) of Legal Metrology (Packaged Commodities) Rules, 2011",
+      "validation": {
+        "type": "presence",
+        "pattern": "(?i)(net\\s*(quantity|wt|weight|content)|net\\s*\\d+|\\d+\\s*(g|kg|ml|l|gm|kilogram|gram|litre|millilitre))",
+        "min_confidence": 0.7
+      }
+    },
+    {
+      "rule_id": "PC-MFR-001",
+      "field": "manufacturer",
+      "requirement": "Manufacturer/packer/importer name and address must be detected",
+      "severity": "high",
+      "legal_reference": "Rule 6(1)(a) of Legal Metrology (Packaged Commodities) Rules, 2011",
+      "validation": {
+        "type": "presence",
+        "pattern": "(?i)(manufactured|mfd\\.?|packed|pkd\\.?|imported|marketed|mkt\\.?|mfg\\.?)\\s*\\.?\\s*by\\b[\\s:]*[\\w\\s.,&()-]+",
+        "min_confidence": 0.6
+      }
+    },
+    {
+      "rule_id": "PC-DATE-001",
+      "field": "manufacturing_date",
+      "requirement": "Manufacturing/packing/import date must be detected",
+      "severity": "medium",
+      "legal_reference": "Rule 6(1)(c) of Legal Metrology (Packaged Commodities) Rules, 2011",
+      "validation": {
+        "type": "presence",
+        "pattern": "(?i)((mfg|mfd|manufacturing|pack(ed)?|pkd|import|exp|expiry|best\\s*before)[\\s:./-]*(date)?[\\s:./-]*)?(\\d{1,2}[\\s./-]+\\d{1,2}[\\s./-]+\\d{2,4}|\\d{1,2}[\\s./-]+\\d{2,4}|(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*[\\s./-]+\\d{2,4})",
+        "min_confidence": 0.6
+      }
+    },
+    {
+      "rule_id": "PC-CARE-001",
+      "field": "consumer_care",
+      "requirement": "Consumer care contact details must be detected",
+      "severity": "medium",
+      "legal_reference": "Rule 6(1)(f) of Legal Metrology (Packaged Commodities) Rules, 2011",
+      "validation": {
+        "type": "presence",
+        "pattern": "(?i)((consumer|customer)\\s*cares?|\\bcares?\\b|helpline|contact|email|phone|toll\\s*free)[\\s:]*[\\w\\s@.()-]+",
+        "min_confidence": 0.6
+      }
+    }
+  ],
+  "confidence_thresholds": {
+    "compliant": 0.7,
+    "review_required": 0.5,
+    "non_compliant": 0.5
+  }
+}

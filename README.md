@@ -1,4 +1,13 @@
-# Legal Metrology OCR + Compliance Demo
+# CompliScan — Legal Metrology Inspection & Supervision
+
+One service, two doors, one shared database:
+
+- **Officer app (mobile web):** http://127.0.0.1:8000/inspect — scan packages, get verdicts, generate reports
+- **Supervisor dashboard (desktop web):** http://127.0.0.1:8000/supervise — monitor officers, review all scans, brand/region analytics
+
+(`/` redirects to `/login`, the single sign-in page.) Every scan from the officer app is recorded in the
+shared SQLite store (`data/compliscan.db`) with its officer attached, so the
+dashboard reads the exact same data — no sync step.
 
 A local prototype for the core of the Legal Metrology packaged-commodity workflow:
 
@@ -10,9 +19,16 @@ This is intentionally focused on the OCR/rule-verification engine. It is not a l
 
 - FastAPI backend with a mobile-friendly web UI
 - Multi-image package scanning (front/back/side/etc.)
-- PaddleOCR adapter (primary, optional)
-- Tesseract adapter (fallback, optional)
+- PaddleOCR primary pass plus a deliberate RapidOCR pass over the enhanced
+  variant; boxes are merged deterministically (IoU + text overlap) with
+  per-pass provenance in `image_id`, never fallback switching
+- 5 OCR variants (enhanced / original / gray-CLAHE / sharpened / adaptive binary)
+  with tuned detection thresholds and rotation recovery
+- Upload decoding with EXIF orientation, HEIC support (`pillow-heif`) and size validation
 - OCR text + bounding boxes
+- Declaration extraction with multi-line window joins, so split declarations
+  (`MRP` on one line, `Rs 120` on the next) resolve to single fields, plus
+  OCR-error normalization (`M.R.P. Rs. 20/-` → MRP `20`)
 - Declaration extraction for prototype fields:
   - manufacturer/packer/importer
   - address
@@ -57,22 +73,6 @@ python -m pip install paddlepaddle paddleocr
 
 If your platform needs a platform-specific PaddlePaddle wheel, follow the current official PaddlePaddle installation instructions rather than forcing a wheel from an old tutorial.
 
-### Option B — Tesseract fallback
-
-Install the system binary:
-
-```bash
-brew install tesseract
-```
-
-Then install the Python adapter:
-
-```bash
-python -m pip install -r requirements.txt
-```
-
-The web app can run with `backend=tesseract`.
-
 ## Run
 
 ```bash
@@ -82,7 +82,11 @@ python -m app.main
 
 Open:
 
-http://127.0.0.1:8000
+http://127.0.0.1:8000/login — sign in (Officer → /inspect, Supervisor → /supervise)
+http://127.0.0.1:8000/inspect — officer scanning app
+http://127.0.0.1:8000/supervise — supervisor dashboard
+
+Demo logins: officer `OFF1234` + name `R. Sharma`; supervisor `SUP001` + password `admin123`.
 
 Or:
 
@@ -113,13 +117,13 @@ You can upload multiple images in one scan to simulate front/back/side inspectio
 Form fields:
 
 - `files`: one or more image files
-- `backend`: `auto`, `paddle`, `tesseract`, or `mock`
+- `backend`: `paddle` (the only production OCR provider)
 
 Example:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/scan \
-  -F 'backend=auto' \
+  -F 'backend=paddle' \
   -F 'files=@sample_images/sample_conflicting_mrp.png'
 ```
 
@@ -133,9 +137,7 @@ Mobile Web UI
      |
      +--> image quality / preprocessing
      |
-     +--> OCR adapter
-     |       +--> PaddleOCR
-     |       +--> Tesseract fallback
+     +--> OpenCV variants -> PaddleOCR
      |
      +--> declaration extractor
      |
@@ -155,6 +157,14 @@ Mobile Web UI
 **AI/OCR extracts. Deterministic rules decide. Human verifies ambiguous findings.**
 
 This demo therefore does not ask an LLM to make legal decisions.
+
+## Optional Gemini semantic assistance
+
+Set `GEMINI_API_KEY` in the environment to enable Gemini only for unresolved,
+ambiguous short labels (for example, an unclear `MFD` line). It receives text
+only, returns a declaration meaning, and is never used to determine compliance.
+Without the key, the deterministic ontology and spatial extractor remain fully
+functional.
 
 ## Next steps after this demo works
 

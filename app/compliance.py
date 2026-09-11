@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .extract import extract_fields
+from .declarations.extractor import extract_fields
+from .evidence_coverage import apply_coverage, capture_recommendation
 from .ocr import OCRBox
 
 
@@ -22,7 +23,7 @@ def evaluate(image_results: list[dict], rules: dict) -> dict:
     merged_boxes: list[OCRBox] = []
     for image_result in image_results:
         merged_boxes.extend(image_result["boxes"])
-    fields = extract_fields(merged_boxes)
+    fields = apply_coverage(extract_fields(merged_boxes), image_results)
     readability = readability_score([x["quality"] for x in image_results])
     fields["readability"] = {"value": readability, "detected": True, "confidence": round(readability/100.0, 3), "bbox": None}
 
@@ -35,7 +36,7 @@ def evaluate(image_results: list[dict], rules: dict) -> dict:
             continue
         field = fields.get(key, {"detected": False, "confidence": 0, "value": None, "bbox": None})
         if not field["detected"]:
-            status, reason = "FAIL", "Required declaration was not extracted from the provided images."
+            status, reason = ("NOT_ASSESSABLE", "Required visual evidence has not been captured clearly enough; request a targeted close-up.") if field.get("coverage", 0) < .65 else ("REVIEW", "The declaration area appears captured, but text interpretation is uncertain.")
         elif field["confidence"] < 0.55:
             status, reason = "REVIEW", "Declaration was detected, but OCR confidence is low; officer verification recommended."
         else:
@@ -44,7 +45,8 @@ def evaluate(image_results: list[dict], rules: dict) -> dict:
 
     mrp_values = []
     for image_result in image_results:
-        mrp_values.extend(image_result["fields"].get("_mrp_values", []))
+        image_fields = image_result.get("fields") or extract_fields(image_result.get("boxes", []))
+        mrp_values.extend(image_fields.get("_mrp_values", []))
     unique_mrp = sorted({round(v, 2) for v in mrp_values})
     conflicts = []
     if len(unique_mrp) > 1:
@@ -53,5 +55,19 @@ def evaluate(image_results: list[dict], rules: dict) -> dict:
     failed = sum(1 for c in checks if c["status"] == "FAIL") + len(conflicts)
     review = sum(1 for c in checks if c["status"] == "REVIEW")
     passed = sum(1 for c in checks if c["status"] == "PASS")
-    overall = "NON-COMPLIANT" if failed else "REVIEW" if review else "COMPLIANT"
-    return {"overall_status": overall, "summary": {"passed": passed, "failed": failed, "review": review, "total_checks": len(checks)+len(conflicts)}, "checks": checks, "conflicts": conflicts, "fields": {k:v for k,v in fields.items() if not k.startswith("_")}}
+    not_assessable = sum(1 for c in checks if c["status"] == "NOT_ASSESSABLE")
+    overall = "NON-COMPLIANT" if failed else "REVIEW" if review or not_assessable else "COMPLIANT"
+    # Photo-quality gate: never certify COMPLIANT on blurry/tiny-print evidence.
+    # Every check passed but the text itself is unreliable → human review.
+    if overall == "COMPLIANT":
+        weak = [r for r in image_results if (r.get("quality") or {}).get("readability", {}).get("blurry") or (r.get("quality") or {}).get("readability", {}).get("tiny_text")]
+        if weak and image_results:
+            readability_field = dict(fields.get("readability", {}))
+            readability_field["confidence"] = min(readability_field.get("confidence", 1), 0.5)
+            checks.append({"id": "photo-quality", "label": "Photo quality for small print", "status": "REVIEW",
+                           "reason": "All declarations read, but the photo evidence is blurry or the print is tiny; officer verification recommended.",
+                           "field": readability_field})
+            review += 1
+            overall = "REVIEW"
+    recommendation = capture_recommendation(fields, image_results)
+    return {"overall_status": overall, "summary": {"passed": passed, "failed": failed, "review": review, "not_assessable": not_assessable, "total_checks": len(checks)+len(conflicts)}, "checks": checks, "conflicts": conflicts, "fields": {k:v for k,v in fields.items() if not k.startswith("_")}, "capture_recommendation": recommendation, "inspection_ready": recommendation["inspection_ready"]}

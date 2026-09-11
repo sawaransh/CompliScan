@@ -4,14 +4,19 @@
 /* ============================================================
    Constants
    ============================================================ */
-const ANGLE_SLOTS = [
+const REQUIRED_SLOTS = [
   { id: "front", label: "Front" },
   { id: "back", label: "Back" },
+];
+
+const OPTIONAL_SLOTS = [
   { id: "left", label: "Left" },
   { id: "right", label: "Right" },
   { id: "top", label: "Top" },
   { id: "bottom", label: "Bottom" },
 ];
+
+const ALL_SLOTS = [...REQUIRED_SLOTS, ...OPTIONAL_SLOTS];
 
 const ANALYSIS_STEPS = [
   "Enhancing image quality",
@@ -90,7 +95,7 @@ function writeJSON(key, value) {
    App state
    ============================================================ */
 const state = {
-  officer: readJSON(STORAGE_KEYS.officer, null),
+  officer: null, // set from the landing-page session on boot
   history: readJSON(STORAGE_KEYS.history, []),
   settings: readJSON(STORAGE_KEYS.settings, { defaultBackend: "auto", lastSync: null }),
   captureSlots: {},   // id -> { file, dataUrl, name }
@@ -99,6 +104,9 @@ const state = {
   currentHistoryId: null, // id of the history entry currently being viewed
   resultOrigin: "home", // where to go back to from result screen
   location: null,      // { lat, lng } if geolocation succeeded
+  evidenceMode: "original",
+  showOcrBoxes: false,
+  activeEvidenceField: null,
 };
 
 /* ============================================================
@@ -112,10 +120,54 @@ const ICONS = {
   image: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="2.4" stroke="currentColor" stroke-width="1.6"/><circle cx="8.3" cy="9.3" r="1.6" stroke="currentColor" stroke-width="1.5"/><path d="m4 17 5-5 3.2 3.2L16 10.5l4 4.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>',
 };
 
-function checkIconFor(status) {
-  if (status === "PASS") return ICONS.check;
-  if (status === "FAIL") return ICONS.cross;
-  return ICONS.warn;
+const SIDES = ["front", "back", "left", "right", "top", "bottom"];
+const SIDE_LABELS = { front: "Front", back: "Back", left: "Left", right: "Right", top: "Top", bottom: "Bottom" };
+const MINI_RING_C = 2 * Math.PI * 26;
+
+const FIND_ICON_SVGS = {
+  product_name: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M14 3v5h5" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  manufacturer: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 20V10l5 3v-3l5 3V7l5-3v16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 20h18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  address: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 21s7-6.1 7-11a7 7 0 1 0-14 0c0 4.9 7 11 7 11Z" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="10" r="2.6" stroke="currentColor" stroke-width="1.6"/></svg>',
+  net_quantity: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 8.5 12 4 4 8.5v7L12 20l8-4.5v-7Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M4 8.5 12 13l8-4.5M12 13v7" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>',
+  mrp: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m4 4 7-.5L20 12.5 12.5 20 3.5 11 4 4Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="9" cy="9" r="1.6" stroke="currentColor" stroke-width="1.5"/></svg>',
+  date: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="15" rx="2.5" stroke="currentColor" stroke-width="1.7"/><path d="M4 10h16M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  consumer_care: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 4h4l2 5-2.5 1.5a12 12 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  readability: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 8V6a2 2 0 0 1 2-2h2M4 16v2a2 2 0 0 0 2 2h2M20 8V6a2 2 0 0 0-2-2h-2M20 16v2a2 2 0 0 1-2 2h-2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/></svg>',
+};
+
+function findIconFor(id) {
+  return FIND_ICON_SVGS[id] || FIND_ICON_SVGS.readability;
+}
+
+function imageSide(img) {
+  const first = String(img.filename || "").toLowerCase().split("_")[0];
+  return SIDES.includes(first) ? first : null;
+}
+
+function imageLabel(img, idx) {
+  const side = imageSide(img);
+  return side ? `${SIDE_LABELS[side]} side` : `Image ${idx + 1}`;
+}
+
+function activateResultTab(name) {
+  $$(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  $$(".tab-panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + name));
+  requestAnimationFrame(moveTabSlider);
+}
+
+function moveTabSlider() {
+  const active = $(".result-tabs .tab-btn.active");
+  const slider = $("#tab-slider");
+  if (!active || !slider) return;
+  slider.style.left = active.offsetLeft + "px";
+  slider.style.width = active.offsetWidth + "px";
+}
+
+function retakeFlow(side) {
+  toast(side
+    ? `Capture the ${side} side — this result is saved in History.`
+    : "Starting a new capture — this result is saved in History.");
+  startCaptureFlow("home");
 }
 
 /* ============================================================
@@ -146,12 +198,14 @@ function showScreen(name) {
   }
   $("#app-body").scrollTop = 0;
   if (el) el.scrollTop = 0;
+  if (name === "result") requestAnimationFrame(moveTabSlider);
 }
 
 let toastTimer = null;
-function toast(message) {
+function toast(message, position) {
   const el = $("#toast");
   $("#toast-text").textContent = message;
+  el.classList.toggle("top", position === "top");
   el.classList.add("show");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove("show"), 2400);
@@ -160,15 +214,60 @@ function toast(message) {
 /* ============================================================
    Boot / auth
    ============================================================ */
-function boot() {
+function migrateStoredHistory() {
+  // One-time cleanup: entries saved before the disclaimer rewording still
+  // carry the old "Prototype scaffold only..." banner text. Rewrite them.
+  const OLD_PHRASE = "Prototype scaffold only";
+  let changed = false;
+  state.history.forEach((h) => {
+    if (h.raw && typeof h.raw.disclaimer === "string" && h.raw.disclaimer.includes(OLD_PHRASE)) {
+      h.raw.disclaimer = "AI-assisted assessment — officer verification required before enforcement action.";
+      h.raw.legal_notice = "This report is generated by an AI-assisted screening tool and does not constitute a legal finding. Verify every requirement, threshold, exception and effective date against the current official Legal Metrology rules and applicable amendments before real enforcement use.";
+      changed = true;
+    }
+  });
+  if (changed) writeJSON(STORAGE_KEYS.history, state.history);
+}
+
+const SESSION_KEY = "compliscan.session";
+
+function authHeaders(extra = {}) {
+  let token = "";
+  try { token = JSON.parse(localStorage.getItem(SESSION_KEY) || "null")?.token || ""; } catch (e) { /* ignore */ }
+  return { ...extra, ...(token ? { Authorization: "Bearer " + token } : {}) };
+}
+
+async function authFetch(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { ...(opts.headers || {}), ...authHeaders() },
+  });
+  if (res.status === 401 || res.status === 403) {
+    localStorage.removeItem(SESSION_KEY);
+    location.href = "/login";
+    throw new Error("Signed out — please sign in again.");
+  }
+  return res;
+}
+
+async function boot() {
+  migrateStoredHistory();
   wireStaticEvents();
   renderCaptureGrid();
 
-  if (state.officer) {
-    enterApp();
-  } else {
-    showScreen("login");
+  // Auth lives on the landing page (/). This app needs a valid officer session.
+  let me = null;
+  try {
+    const res = await authFetch("/api/auth/me");
+    me = await res.json();
+  } catch (e) { /* authFetch already redirected on 401 */ return; }
+  if (!me || me.role !== "officer") {
+    localStorage.removeItem(SESSION_KEY);
+    location.href = "/login";
+    return;
   }
+  state.officer = { id: me.id, name: me.name, dept: me.dept || "Legal Metrology Department" };
+  enterApp();
 }
 
 function enterApp() {
@@ -178,47 +277,67 @@ function enterApp() {
   tryGeolocate();
 }
 
-function login(officer) {
-  state.officer = officer;
-  writeJSON(STORAGE_KEYS.officer, officer);
-  toast(`Welcome, ${officer.name.split(" ")[0]}`);
-  enterApp();
-}
-
-function logout() {
-  state.officer = null;
-  localStorage.removeItem(STORAGE_KEYS.officer);
-  showScreen("login");
+async function logout() {
+  try { await authFetch("/api/auth/logout", { method: "POST" }); } catch (e) { /* ignore */ }
+  localStorage.removeItem(SESSION_KEY);
+  location.href = "/";
 }
 
 function tryGeolocate() {
-  if (!navigator.geolocation) return;
-  navigator.geolocation.getCurrentPosition(
-    (pos) => { state.location = { lat: pos.coords.latitude, lng: pos.coords.longitude }; },
-    () => { /* silently ignore — location is optional in this prototype */ },
-    { timeout: 4000 }
-  );
+  const fallback = { lat: 28.6139, lng: 77.2090 };
+  function apply(pos) {
+    const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    // Guard against cached stale fixes and absurd accuracy claims.
+    if (!isFinite(loc.lat) || !isFinite(loc.lng)) return;
+    state.location = loc;
+    updateLocationUI();
+    reverseGeocodeCity(loc.lat, loc.lng).then((city) => {
+      if (city) { state.city = city; updateLocationUI(); }
+    }).catch(() => {});
+  }
+  function onError() {
+    if (!state.location) {
+      state.locationError = true;
+      updateLocationUI();
+    }
+  }
+  if (!navigator.geolocation) { onError(); return; }
+  navigator.geolocation.watchPosition(apply, onError, { enableHighAccuracy: true, maximumAge: 30000, timeout: 8000 });
+  navigator.geolocation.getCurrentPosition(apply, onError, { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 });
+}
+
+function updateLocationUI() {
+  const badge = $("#loc-badge");
+  if (!badge) return;
+  if (state.location) {
+    const city = state.city ? `${state.city} · ` : "";
+    badge.className = "loc-badge ok";
+    badge.textContent = `GPS ${city}${state.location.lat.toFixed(4)}, ${state.location.lng.toFixed(4)}`;
+  } else if (state.locationError) {
+    badge.className = "loc-badge warn";
+    badge.textContent = "GPS unavailable — allow location for heatmap";
+  } else {
+    badge.className = "loc-badge";
+    badge.textContent = "Acquiring GPS…";
+  }
+}
+
+async function reverseGeocodeCity(lat, lng) {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=10&addressdetails=1`;
+    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const addr = data.address || {};
+    return addr.city || addr.town || addr.village || addr.county || addr.state_district || null;
+  } catch (e) { return null; }
 }
 
 /* ============================================================
    Static event wiring (elements that always exist)
    ============================================================ */
 function wireStaticEvents() {
-  // Login
-  $("#login-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const id = $("#li-id").value.trim();
-    const name = $("#li-name").value.trim();
-    const dept = $("#li-dept").value.trim() || "Legal Metrology Department";
-    if (!id || !name) return;
-    login({ id, name, dept });
-  });
-  $("#btn-govt-id").addEventListener("click", () => {
-    login({ id: "GOVT-VERIFIED", name: "Verified Officer", dept: "Legal Metrology Department" });
-  });
-  $("#btn-offline").addEventListener("click", () => {
-    login({ id: "OFFLINE", name: "Offline Officer", dept: "Legal Metrology Department" });
-  });
+  // Auth is handled by the landing page (/); this app boots from its session.
 
   // Tab bar
   $$(".tab-item[data-nav]").forEach((btn) => {
@@ -233,29 +352,52 @@ function wireStaticEvents() {
   });
   $("#tab-scan").addEventListener("click", () => startCaptureFlow("home"));
   $("#home-scan-cta").addEventListener("click", () => startCaptureFlow("home"));
-  $("#home-profile-btn").addEventListener("click", () => { renderProfile(); showScreen("profile"); });
   $("#qa-history").addEventListener("click", () => { renderHistory(); showScreen("history"); });
   $("#qa-reports").addEventListener("click", () => { renderReports(); showScreen("reports"); });
 
   // Capture
   $("#capture-back").addEventListener("click", () => navigateToTab(state.resultOrigin === "history" ? "history" : "home"));
-  $("#extra-shot-input").addEventListener("change", onExtraShotChosen);
   $("#btn-proceed-analysis").addEventListener("click", onProceedToAnalysis);
 
   // Result
   $("#result-back").addEventListener("click", () => navigateToTab(state.resultOrigin));
   $$(".tab-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      $$(".tab-btn").forEach((b) => b.classList.remove("active"));
-      $$(".tab-panel").forEach((p) => p.classList.remove("active"));
-      btn.classList.add("active");
-      $("#tab-" + btn.dataset.tab).classList.add("active");
-    });
+    btn.addEventListener("click", () => activateResultTab(btn.dataset.tab));
+  });
+  window.addEventListener("resize", () => {
+    if ($("#screen-result").classList.contains("active")) moveTabSlider();
+  });
+  $("#btn-review-findings").addEventListener("click", () => {
+    activateResultTab("details");
+    $("#screen-result").scrollTop = 0;
   });
   $("#btn-generate-report").addEventListener("click", () => {
     markCurrentReportGenerated();
     renderReport();
     showScreen("report");
+  });
+  $("#btn-retake-sides").addEventListener("click", () => retakeFlow());
+  $("#btn-add-retake").addEventListener("click", () => retakeFlow());
+  $("#sum-view-more").addEventListener("click", () => {
+    const extra = $("#sum-prod-extra");
+    const btn = $("#sum-view-more");
+    const open = extra.classList.toggle("open");
+    btn.classList.toggle("open", open);
+    btn.firstChild.textContent = open ? "View less " : "View more ";
+  });
+  $("#ev-select").addEventListener("change", (e) => {
+    state.evidenceIdx = Number(e.target.value) || 0;
+    renderEvidence(state.currentRun ? state.currentRun.images || [] : []);
+  });
+  $("#ev-prev").addEventListener("click", () => stepEvidence(-1));
+  $("#ev-next").addEventListener("click", () => stepEvidence(1));
+  $$(".ev-mode-btn").forEach((btn) => btn.addEventListener("click", () => {
+    state.evidenceMode = btn.dataset.evidenceMode;
+    renderEvidence(state.currentRun ? state.currentRun.images || [] : []);
+  }));
+  $("#ev-show-ocr").addEventListener("change", (e) => {
+    state.showOcrBoxes = e.target.checked;
+    renderEvidence(state.currentRun ? state.currentRun.images || [] : []);
   });
 
   // Report
@@ -290,7 +432,7 @@ function wireStaticEvents() {
     toast("Data synced");
   });
   $("#profile-settings").addEventListener("click", () => {
-    const order = ["auto", "paddle", "tesseract", "mock"];
+    const order = ["paddle"];
     const next = order[(order.indexOf(state.settings.defaultBackend) + 1) % order.length];
     state.settings.defaultBackend = next;
     writeJSON(STORAGE_KEYS.settings, state.settings);
@@ -358,16 +500,16 @@ function startCaptureFlow(origin) {
   state.captureSlots = {};
   state.extraShots = [];
   renderCaptureGrid();
-  renderExtraShots();
-  updateCaptureFooter();
-  $("#backend-select").value = state.settings.defaultBackend || "auto";
+  renderSideStrip();
+  updateCaptureState();
+  $("#capture-hint").textContent = "Start with front and back. The app will request a close-up only when evidence is insufficient.";
   showScreen("capture");
 }
 
 function renderCaptureGrid() {
-  const grid = $("#capture-grid");
+  const grid = $("#capture-grid-required");
   grid.innerHTML = "";
-  ANGLE_SLOTS.forEach((slot) => {
+  REQUIRED_SLOTS.forEach((slot) => {
     const el = document.createElement("label");
     el.className = "capture-slot";
     el.dataset.slot = slot.id;
@@ -386,8 +528,9 @@ async function onSlotChosen(slot, e) {
   if (!file) return;
   const dataUrl = await fileToDataUrl(file);
   state.captureSlots[slot.id] = { file, dataUrl, name: `${slot.id}_${file.name}` };
-  renderSlotFilled(slot);
-  updateCaptureFooter();
+  if (REQUIRED_SLOTS.some((s) => s.id === slot.id)) renderSlotFilled(slot);
+  else renderSideStrip();
+  updateCaptureState();
 }
 
 function renderSlotFilled(slot) {
@@ -406,12 +549,9 @@ function renderSlotFilled(slot) {
     e.preventDefault(); e.stopPropagation();
     delete state.captureSlots[slot.id];
     renderCaptureGrid();
-    // re-render any already-filled slots after the full grid reset
-    Object.keys(state.captureSlots).forEach((id) => {
-      const s = ANGLE_SLOTS.find((a) => a.id === id);
-      if (s) renderSlotFilled(s);
-    });
-    updateCaptureFooter();
+    // re-render any already-filled required slots after the full grid reset
+    REQUIRED_SLOTS.forEach((s) => { if (state.captureSlots[s.id]) renderSlotFilled(s); });
+    updateCaptureState();
   });
 }
 
@@ -421,47 +561,94 @@ async function onExtraShotChosen(e) {
   const dataUrl = await fileToDataUrl(file);
   state.extraShots.push({ file, dataUrl, name: `extra_${state.extraShots.length + 1}_${file.name}` });
   e.target.value = "";
-  renderExtraShots();
-  updateCaptureFooter();
+  renderSideStrip();
+  updateCaptureState();
 }
 
-function renderExtraShots() {
-  const list = $("#extra-shots-list");
-  list.innerHTML = "";
+function renderSideStrip() {
+  const strip = $("#side-strip");
+  strip.innerHTML = "";
+  OPTIONAL_SLOTS.forEach((slot) => {
+    const shot = state.captureSlots[slot.id];
+    const el = document.createElement("label");
+    el.className = "mini-slot" + (shot ? " filled" : "");
+    el.dataset.slot = slot.id;
+    if (shot) {
+      el.innerHTML = `
+        <img class="ms-preview" src="${shot.dataUrl}" alt="${esc(slot.label)} preview">
+        <span class="ms-check">${ICONS.check}</span>
+        <button type="button" class="ms-remove" aria-label="Remove ${esc(slot.label)}">${ICONS.cross}</button>
+        <input type="file" accept="image/*" capture="environment">`;
+      el.querySelector("input").addEventListener("change", (e) => onSlotChosen(slot, e));
+      el.querySelector(".ms-remove").addEventListener("click", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        delete state.captureSlots[slot.id];
+        renderSideStrip();
+        updateCaptureState();
+      });
+    } else {
+      el.innerHTML = `
+        <input type="file" accept="image/*" capture="environment">
+        <span class="ms-icon">${ICONS.camera}</span>
+        <span class="ms-label">${slot.label}</span>`;
+      el.querySelector("input").addEventListener("change", (e) => onSlotChosen(slot, e));
+    }
+    strip.appendChild(el);
+  });
   state.extraShots.forEach((shot, idx) => {
     const tile = document.createElement("div");
     tile.className = "extra-shot";
-    tile.innerHTML = `<img src="${shot.dataUrl}" alt="Additional angle"><button type="button" aria-label="Remove">${ICONS.cross}</button>`;
+    tile.innerHTML = `<img src="${shot.dataUrl}" alt="Close-up ${idx + 1}"><button type="button" aria-label="Remove close-up">${ICONS.cross}</button>`;
     tile.querySelector("button").addEventListener("click", () => {
       state.extraShots.splice(idx, 1);
-      renderExtraShots();
-      updateCaptureFooter();
+      renderSideStrip();
+      updateCaptureState();
     });
-    list.appendChild(tile);
+    strip.appendChild(tile);
   });
   const addTile = document.createElement("label");
   addTile.className = "add-shot-tile";
-  addTile.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><input type="file" accept="image/*" capture="environment" id="extra-shot-input">`;
+  addTile.title = "Add close-up";
+  addTile.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><input type="file" accept="image/*" capture="environment">`;
   addTile.querySelector("input").addEventListener("change", onExtraShotChosen);
-  list.appendChild(addTile);
+  strip.appendChild(addTile);
 }
 
 function collectAllShots() {
-  const slotShots = ANGLE_SLOTS.filter((s) => state.captureSlots[s.id]).map((s) => state.captureSlots[s.id]);
+  const slotShots = ALL_SLOTS.filter((s) => state.captureSlots[s.id]).map((s) => state.captureSlots[s.id]);
   return [...slotShots, ...state.extraShots];
 }
 
-function updateCaptureFooter() {
+function updateCaptureState() {
+  const hasFront = !!state.captureSlots.front;
+  const hasBack = !!state.captureSlots.back;
+  const note = $("#coverage-note");
+  const proceedBtn = $("#btn-proceed-analysis");
+
+  if (hasFront && hasBack) {
+    note.className = "coverage-note ok";
+    note.innerHTML = `${ICONS.check}<span><b>Coverage sufficient for analysis.</b> Front and back captured.</span>`;
+    proceedBtn.disabled = false;
+  } else if (hasFront || hasBack) {
+    note.className = "coverage-note warn";
+    note.innerHTML = hasFront
+      ? `${ICONS.warn}<span><b>Back side recommended.</b> You can analyze now; add it for stronger declaration coverage.</span>`
+      : `${ICONS.warn}<span><b>Front side recommended.</b> You can analyze now; add it to identify the product more reliably.</span>`;
+    proceedBtn.disabled = false;
+  } else {
+    note.className = "coverage-note";
+    note.innerHTML = `<span>Capture the <b>front</b> and <b>back</b> of the package to proceed.</span>`;
+    proceedBtn.disabled = true;
+  }
+
   const count = collectAllShots().length;
   $("#capture-count").textContent = count === 0 ? "0 images captured" : `${count} image${count > 1 ? "s" : ""} captured`;
-  $("#btn-proceed-analysis").disabled = count === 0;
 }
 
 function onProceedToAnalysis() {
   const shots = collectAllShots();
   if (!shots.length) return;
-  const backend = $("#backend-select").value;
-  runAnalysis(shots, backend);
+  runAnalysis(shots);
 }
 
 /* ============================================================
@@ -495,7 +682,7 @@ function setRingProgress(pct) {
   $("#ring-pct").textContent = `${Math.round(pct)}%`;
 }
 
-async function runAnalysis(shots, backendVal) {
+async function runAnalysis(shots) {
   state.resultOrigin = state.resultOrigin || "home";
   showScreen("analyzing");
   renderAnalysisSteps();
@@ -516,12 +703,21 @@ async function runAnalysis(shots, backendVal) {
   try {
     const formData = new FormData();
     shots.forEach((shot) => formData.append("files", shot.file, shot.name));
-    formData.append("backend", backendVal);
+    formData.append("backend", "paddle");
+    // Officer identity comes from the signed-in session, not the client.
+    if (state.location) {
+      formData.append("lat", String(state.location.lat));
+      formData.append("lng", String(state.location.lng));
+    }
+    if (state.city) formData.append("city", state.city);
 
-    const response = await fetch("/api/scan", { method: "POST", body: formData });
+    const response = await authFetch("/api/scan", { method: "POST", body: formData });
     const data = await response.json();
     clearInterval(stepTimer);
-    if (!response.ok || data.error) throw new Error(data.error || "Scan failed");
+    if (!response.ok || data.error) {
+      const detail = (data.warnings && data.warnings[0]) || data.error || "Scan failed";
+      throw new Error(detail);
+    }
 
     for (let i = stepIndex; i < ANALYSIS_STEPS.length; i++) {
       setStepState(i, "done");
@@ -548,6 +744,7 @@ function handleScanSuccess(data, shots) {
 
   const entry = {
     id: data.inspection_id,
+    runId: (data.result_file || "").split("/")[2] || null,
     date: new Date().toISOString(),
     product: fields.product_name && fields.product_name.value ? fields.product_name.value : "Unnamed product",
     manufacturer: fields.manufacturer && fields.manufacturer.value ? fields.manufacturer.value : null,
@@ -567,14 +764,22 @@ function handleScanSuccess(data, shots) {
   writeJSON(STORAGE_KEYS.history, state.history);
   state.currentHistoryId = entry.id;
 
+  const recommendation = c.capture_recommendation;
+  if (recommendation && recommendation.capture_required) {
+    $("#capture-hint").textContent = recommendation.capture_instruction || recommendation.reason;
+  }
+
   renderResult(data);
   showScreen("result");
 }
 
 function stripBoxesForStorage(data) {
-  // Keep the payload lean for localStorage: drop the raw OCR boxes, keep everything the UI renders.
+  // Keep enough raw evidence for the offline history viewer, while preventing
+  // unusually dense labels from exhausting local browser storage.
   const clone = JSON.parse(JSON.stringify(data));
-  (clone.images || []).forEach((img) => { delete img.boxes; });
+  (clone.images || []).forEach((img) => {
+    img.boxes = (img.boxes || []).slice(0, 200).map(({ text, confidence, bbox }) => ({ text, confidence, bbox }));
+  });
   return clone;
 }
 
@@ -592,111 +797,377 @@ function openHistoryEntry(id, origin) {
    RESULT
    ============================================================ */
 function renderResult(data) {
+  state.evidenceIdx = 0;
+  state.evidenceMode = "original";
+  state.showOcrBoxes = false;
+  state.activeEvidenceField = null;
+  activateResultTab("summary");
+  renderSummary(data);
+  renderFindings(data.compliance);
+  renderEvidence(data.images || []);
+}
+
+/* ---------------- Summary ---------------- */
+function renderSummary(data) {
+  $("#tab-summary").classList.remove("enter");
   const c = data.compliance;
   const fields = c.fields || {};
+  const images = data.images || [];
+  const entry = currentEntry();
+  const locText = state.location
+    ? `${state.location.lat.toFixed(4)}, ${state.location.lng.toFixed(4)}`
+    : "Location unavailable";
 
-  const hero = $("#result-hero");
-  hero.className = `result-hero ${c.overall_status}`;
-  $("#result-hero-status").textContent = statusLabel(c.overall_status);
-  $("#result-hero-badge").innerHTML = c.overall_status === "COMPLIANT" ? ICONS.check : c.overall_status === "NON-COMPLIANT" ? ICONS.cross : ICONS.warn;
-  $("#result-hero-meta").textContent = `${data.inspection_id} · Rule set ${data.rule_set_id} · ${(data.images || []).length} image(s)`;
+  $("#sum-id").textContent = data.inspection_id;
+  $("#sum-sub").textContent = `${fmtDate(entry ? entry.date : new Date().toISOString())} · ${locText}`;
 
-  $("#result-product-name").textContent = (fields.product_name && fields.product_name.value) || "Product name not detected";
-  const sub = [];
-  if (fields.net_quantity && fields.net_quantity.value) sub.push(`Net qty: ${fields.net_quantity.value}`);
-  if (fields.mrp && fields.mrp.value) sub.push(`MRP: ₹${fields.mrp.value}`);
-  $("#result-product-sub").textContent = sub.length ? sub.join(" · ") : "No net quantity / MRP detected";
+  const total = c.summary.total_checks || (c.summary.passed + c.summary.failed + c.summary.review);
+  const verdict = $("#sum-verdict");
+  if (c.overall_status === "NON-COMPLIANT") {
+    verdict.className = "verdict bad";
+    verdict.innerHTML = `<div class="verdict-ic">${ICONS.warn}</div><div><h2>Action Required</h2><div class="v-sub">${c.summary.failed} of ${total} checks need attention</div><div class="v-desc">Some mandatory declarations are missing or unclear. Review the findings below.</div></div>`;
+  } else if (c.overall_status === "REVIEW") {
+    verdict.className = "verdict warn";
+    verdict.innerHTML = `<div class="verdict-ic">${ICONS.warn}</div><div><h2>Needs Review</h2><div class="v-sub">${c.summary.review} of ${total} checks need a second look</div><div class="v-desc">Some declarations need officer verification. Review the findings below.</div></div>`;
+  } else {
+    verdict.className = "verdict ok";
+    verdict.innerHTML = `<div class="verdict-ic">${ICONS.check}</div><div><h2>Compliant</h2><div class="v-sub">All ${total} checks passed</div><div class="v-desc">All mandatory declarations were extracted with sufficient confidence.</div></div>`;
+  }
 
-  $("#find-pass").textContent = c.summary.passed;
-  $("#find-fail").textContent = c.summary.failed;
-  $("#find-review").textContent = c.summary.review;
+  $("#sum-pass").textContent = c.summary.passed;
+  $("#sum-fail").textContent = c.summary.failed;
+  $("#sum-review").textContent = c.summary.review;
 
-  const conflictsEl = $("#result-conflicts");
-  conflictsEl.innerHTML = "";
-  (c.conflicts || []).forEach((conf) => {
-    const div = document.createElement("div");
-    div.className = "conflict-note";
-    div.innerHTML = `${ICONS.warn}<span><b>${esc(conf.type.replace(/_/g, " "))}:</b> ${esc(conf.message)} (${conf.values.map((v) => "₹" + v).join(", ")})</span>`;
-    conflictsEl.appendChild(div);
+  // Product card
+  const firstImg = images[0];
+  $("#sum-thumb").innerHTML = firstImg
+    ? `<img src="${firstImg.annotated_url}" alt="Product thumbnail">`
+    : ICONS.image;
+  $("#sum-product-name").textContent = (fields.product_name && fields.product_name.value) || "Product name not detected";
+
+  const rowsEl = $("#sum-prod-rows");
+  rowsEl.innerHTML = "";
+  const prodRows = [
+    { k: "Manufacturer", f: fields.manufacturer },
+    { k: "Net Quantity", f: fields.net_quantity },
+    { k: "MRP", f: fields.mrp, money: true },
+  ];
+  const extraRows = [
+    { k: "Address", f: fields.address },
+    { k: "Packing date", f: fields.date },
+    { k: "Consumer care", f: fields.consumer_care },
+    { k: "Country of origin", f: fields.country_of_origin },
+  ];
+  prodRows.forEach((r) => rowsEl.appendChild(buildProdRow(r.k, r.f, r.money)));
+  const extraWrap = document.createElement("div");
+  extraWrap.className = "prod-extra";
+  extraWrap.id = "sum-prod-extra";
+  extraRows.forEach((r) => extraWrap.appendChild(buildProdRow(r.k, r.f, r.money)));
+  rowsEl.appendChild(extraWrap);
+  const moreBtn = $("#sum-view-more");
+  moreBtn.classList.remove("open");
+  moreBtn.firstChild.textContent = "View more ";
+
+  // Scan quality
+  const qualities = images.map((img) => img.quality).filter(Boolean);
+  const avg = (fn) => qualities.length ? Math.round(qualities.reduce((a, q) => a + fn(q), 0) / qualities.length) : 0;
+  const imgQ = avg((q) => q.sharpness_score || 0);
+  const textQ = avg((q) => q.contrast_score || 0);
+  const ocrConfs = Object.keys(fields)
+    .filter((k) => k !== "readability" && fields[k] && fields[k].detected)
+    .map((k) => (fields[k].confidence || 0) * 100);
+  const ocrQ = ocrConfs.length ? Math.round(ocrConfs.reduce((a, b) => a + b, 0) / ocrConfs.length) : 0;
+  setMiniRing("ring-img", imgQ);
+  setMiniRing("ring-text", textQ);
+  setMiniRing("ring-ocr", ocrQ);
+  const meanQ = Math.round((imgQ + textQ + ocrQ) / 3);
+  const chip = $("#sum-quality-chip");
+  if (meanQ >= 75) {
+    chip.className = "mini-chip";
+    chip.textContent = "Good";
+    $("#sum-quality-sub").textContent = "Images are clear and readable";
+  } else if (meanQ >= 50) {
+    chip.className = "mini-chip amber";
+    chip.textContent = "Fair";
+    $("#sum-quality-sub").textContent = "Most images are readable, some could be clearer";
+  } else {
+    chip.className = "mini-chip red";
+    chip.textContent = "Poor";
+    $("#sum-quality-sub").textContent = "Images are unclear — consider retaking";
+  }
+  const glareQ = avg((q) => q.glare_score || 0);
+  let tip;
+  if (qualities.length && glareQ < 60) {
+    tip = "Tip: Avoid glare and shadows on the package for cleaner extraction.";
+  } else if (imgQ <= textQ && imgQ <= ocrQ) {
+    tip = "Tip: Hold the camera steady and fill the frame with the package.";
+  } else if (ocrQ <= textQ) {
+    tip = "Tip: Capture right and top views to improve detection of MRP and net quantity.";
+  } else {
+    tip = "Tip: Front and back covers are enough when all declarations are visible.";
+  }
+  $("#sum-tip").innerHTML = `${ICONS.warn}<span><b>${esc(tip.split(":")[0])}:</b>${esc(tip.split(":").slice(1).join(":"))}</span>`;
+
+  // Coverage
+  const captured = new Set(images.map(imageSide).filter(Boolean));
+  $("#sum-cov-chip").textContent = `${captured.size} / 6`;
+  $("#sum-cov-chip").className = "mini-chip " + (captured.size >= 6 ? "" : "blue");
+  const covGrid = $("#sum-cov-grid");
+  covGrid.innerHTML = "";
+  SIDES.forEach((side) => {
+    const hit = captured.has(side);
+    const cell = document.createElement("div");
+    cell.className = "cov-side";
+    cell.innerHTML = `<div class="cov-dot ${hit ? "hit" : "miss"}">${hit ? ICONS.check : ICONS.cross}</div><span>${SIDE_LABELS[side]}</span>`;
+    covGrid.appendChild(cell);
   });
 
-  renderChecksTab(c);
-  renderFieldsTab(fields);
-  renderEvidenceTab(data.images || []);
-
-  const warnings = (data.warnings || []).length ? `<div style="margin-top:8px;">Notes: ${esc(data.warnings.join("; "))}</div>` : "";
-  $("#result-disclaimer").innerHTML = esc(data.disclaimer) + warnings;
+  const panel = $("#tab-summary");
+  void panel.offsetWidth;
+  panel.classList.add("enter");
 }
 
-function renderChecksTab(c) {
-  const el = $("#checks-list");
-  el.innerHTML = "";
-  c.checks.forEach((row) => {
-    const div = document.createElement("div");
-    div.className = "check-row";
-    const f = row.field || {};
-    const confPct = Math.round((f.confidence || 0) * 100);
-    div.innerHTML = `
-      <div class="check-icon ${row.status}">${checkIconFor(row.status)}</div>
-      <div class="check-main">
-        <div class="check-label">${esc(row.label)}</div>
-        <div class="check-reason">${esc(row.reason)}</div>
-        ${f.value != null ? `<div class="check-value">Detected: "${esc(f.value)}" · ${confPct}% confidence</div>` : ""}
-      </div>
-    `;
-    el.appendChild(div);
-  });
-  (c.conflicts || []).forEach((conf) => {
-    const div = document.createElement("div");
-    div.className = "check-row";
-    div.innerHTML = `
-      <div class="check-icon FAIL">${ICONS.cross}</div>
-      <div class="check-main">
-        <div class="check-label">MRP consistency</div>
-        <div class="check-reason">${esc(conf.message)}</div>
-        <div class="check-value">Values found: ${conf.values.map((v) => "₹" + esc(v)).join(", ")}</div>
-      </div>
-    `;
-    el.appendChild(div);
-  });
+function buildProdRow(label, f, money) {
+  const row = document.createElement("div");
+  row.className = "kv-row";
+  if (!f || !f.detected || f.value == null) {
+    row.innerHTML = `<span class="k">${esc(label)}</span><span class="v missing">Not detected</span>`;
+  } else if (money && (f.confidence || 0) < 0.6) {
+    row.innerHTML = `<span class="k">${esc(label)}</span><span class="v unconfirmed">₹${esc(f.value)} (not confirmed)</span>`;
+  } else {
+    row.innerHTML = `<span class="k">${esc(label)}</span><span class="v">${money ? "₹" : ""}${esc(f.value)}</span>`;
+  }
+  return row;
 }
 
-function renderFieldsTab(fields) {
-  const el = $("#fields-list");
-  el.innerHTML = "";
-  Object.keys(FIELD_LABELS).forEach((key) => {
-    const f = fields[key];
-    if (!f) return;
-    const div = document.createElement("div");
-    div.className = "field-row";
-    const confPct = Math.round((f.confidence || 0) * 100);
-    div.innerHTML = `
-      <div class="field-k">${esc(FIELD_LABELS[key])}</div>
-      <div>
-        <div class="field-v">${f.value != null ? esc(f.value) : "Not detected"}</div>
-        ${f.detected ? `<div class="field-conf">${confPct}% confidence</div>` : ""}
-      </div>
-    `;
-    el.appendChild(div);
-  });
+function setMiniRing(id, pct) {
+  const ring = document.getElementById(id);
+  if (!ring) return;
+  const clamped = Math.min(100, Math.max(0, pct));
+  ring.classList.remove("ok", "mid", "low");
+  ring.classList.add(clamped >= 75 ? "ok" : clamped >= 50 ? "mid" : "low");
+  ring.style.strokeDasharray = String(MINI_RING_C);
+  ring.style.strokeDashoffset = String(MINI_RING_C);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    ring.style.strokeDashoffset = String(MINI_RING_C * (1 - clamped / 100));
+  }));
+  const label = document.getElementById(id + "-t");
+  if (label) label.textContent = `${Math.round(clamped)}%`;
 }
 
-function renderEvidenceTab(images) {
-  const el = $("#evidence-list");
+/* ---------------- Findings ---------------- */
+function renderFindings(c) {
+  const el = $("#findings-list");
   el.innerHTML = "";
+
+  const fails = (c.checks || []).filter((r) => r.status === "FAIL");
+  const conflicts = (c.conflicts || []).map((conf) => ({
+    id: "conflict",
+    label: "MRP consistency",
+    status: "FAIL",
+    reason: conf.message,
+    field: { value: conf.values.map((v) => "₹" + v).join(", "), detected: true, confidence: null },
+  }));
+  const attention = [...fails, ...conflicts];
+  const reviews = (c.checks || []).filter((r) => r.status === "REVIEW" || r.status === "NOT_ASSESSABLE");
+  const verified = (c.checks || []).filter((r) => r.status === "PASS");
+
+  if (attention.length) {
+    el.appendChild(buildFindGroup("bad", "Needs Attention", attention.length,
+      "Review and resolve these issues", attention));
+  }
+  if (reviews.length) {
+    el.appendChild(buildFindGroup("warn", "Needs Review", reviews.length,
+      "Detected with low confidence — officer verification recommended", reviews));
+  }
+  if (verified.length) {
+    el.appendChild(buildFindGroup("ok", "Verified", verified.length,
+      "Extracted with sufficient confidence", verified));
+  }
+}
+
+function buildFindGroup(tone, title, count, sub, items) {
+  const group = document.createElement("div");
+  group.className = "find-group";
+  const icon = tone === "bad" ? ICONS.cross : tone === "warn" ? ICONS.warn : ICONS.check;
+  group.innerHTML = `
+    <div class="find-group-head">
+      <div class="find-group-ic ${tone}">${icon}</div>
+      <h3>${esc(title)} (${count})</h3>
+    </div>
+    <div class="find-group-sub">${esc(sub)}</div>
+  `;
+  items.forEach((row) => group.appendChild(buildFindCard(row)));
+  return group;
+}
+
+function buildFindCard(row) {
+  const tone = row.status === "FAIL" ? "bad" : (row.status === "REVIEW" || row.status === "NOT_ASSESSABLE") ? "warn" : "ok";
+  const chip = row.status === "FAIL" ? "Required" : row.status === "NOT_ASSESSABLE" ? "Capture needed" : row.status === "REVIEW" ? "Unclear" : "Verified";
+  const f = row.field || {};
+  const confPct = f.confidence == null ? null : Math.round(f.confidence * 100);
+
+  const card = document.createElement("div");
+  card.className = "find-card";
+  card.innerHTML = `
+    <button class="find-row" type="button">
+      <div class="find-ic ${tone}">${findIconFor(row.id)}</div>
+      <div class="find-main">
+        <div class="find-top">
+          <div class="find-label">${esc(row.label)}</div>
+          <span class="find-chip ${tone}">${chip}</span>
+        </div>
+        <div class="find-reason">${esc(row.reason)}</div>
+        ${confPct == null ? "" : `<div class="find-conf">Confidence: ${confPct}%</div>`}
+      </div>
+      <svg class="find-chev" width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m9 6 6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="find-detail">
+      ${f.detected && f.value != null
+        ? `<div>Detected value:</div><div class="detected"><b>${esc(row.id === "mrp" ? "₹" + f.value : f.value)}</b>${confPct == null ? "" : ` · ${confPct}% confidence`}</div>`
+        : `<div>No value was extracted from the provided images.</div>`}
+    </div>
+  `;
+  const btn = card.querySelector(".find-row");
+  const detail = card.querySelector(".find-detail");
+  btn.addEventListener("click", () => {
+    btn.classList.toggle("open");
+    detail.classList.toggle("open");
+  });
+  return card;
+}
+
+/* ---------------- Evidence ---------------- */
+function renderEvidence(images) {
+  const select = $("#ev-select");
+  const viewer = $("#ev-image");
+  const extracted = $("#ev-extracted");
+  const grid = $("#ev-grid");
+  const overlay = $("#ev-overlay");
+
   if (!images.length) {
-    el.innerHTML = `<div class="empty-note">No annotated images available.</div>`;
+    select.innerHTML = `<option>No images</option>`;
+    $("#ev-count").textContent = "0 / 0";
+    viewer.removeAttribute("src");
+    overlay.innerHTML = "";
+    extracted.innerHTML = `<div class="empty-note">No annotated images available.</div>`;
+    grid.innerHTML = "";
     return;
   }
-  images.forEach((img) => {
-    const div = document.createElement("div");
-    div.className = "evidence-item";
-    div.innerHTML = `
-      <img src="${img.annotated_url}" alt="Annotated evidence for ${esc(img.filename || "image")}">
-      <div class="evidence-cap"><span>${esc(img.filename || "image")} · ${esc(img.backend)}</span><span>sharpness ${esc(img.quality.sharpness_score)}</span></div>
-    `;
-    el.appendChild(div);
+
+  state.evidenceIdx = Math.min(state.evidenceIdx || 0, images.length - 1);
+  const idx = state.evidenceIdx;
+  const img = images[idx];
+
+  select.innerHTML = "";
+  images.forEach((im, i) => {
+    const opt = document.createElement("option");
+    opt.value = i;
+    opt.textContent = imageLabel(im, i);
+    select.appendChild(opt);
   });
+  select.value = String(idx);
+  $("#ev-count").textContent = `${idx + 1} / ${images.length}`;
+  const isAnnotated = state.evidenceMode === "annotated";
+  const source = isAnnotated ? img.annotated_url : (img.original_url || img.annotated_url);
+  viewer.src = source;
+  viewer.alt = `${isAnnotated ? "Annotated" : "Original"} evidence — ${imageLabel(img, idx)}`;
+  $$(".ev-mode-btn").forEach((button) => button.classList.toggle("active", button.dataset.evidenceMode === state.evidenceMode));
+  $("#ev-show-ocr").checked = state.showOcrBoxes;
+  const viewerWrap = $("#ev-viewer");
+  viewerWrap.classList.remove("swap");
+  void viewerWrap.offsetWidth;
+  viewerWrap.classList.add("swap");
+  $("#ev-extract-title").textContent = `Extracted Text (${imageLabel(img, idx)})`;
+  $("#ev-full").href = source;
+
+  extracted.innerHTML = "";
+  const imgFields = img.fields || {};
+  let shown = 0;
+  Object.keys(FIELD_LABELS).forEach((key) => {
+    if (key === "readability") return;
+    const f = imgFields[key];
+    if (!f) return;
+    shown += 1;
+    const row = document.createElement("div");
+    row.className = "ext-row evidence-field" + (state.activeEvidenceField === key ? " selected" : "");
+    const confPct = Math.round((f.confidence || 0) * 100);
+    const pill = !f.detected
+      ? `<span class="conf-pill na">—</span>`
+      : `<span class="conf-pill ${confPct >= 90 ? "high" : confPct >= 60 ? "mid" : "low"}">${confPct}%</span>`;
+    const val = !f.detected || f.value == null
+      ? `<span class="v" style="color:var(--muted);font-weight:400;">Not detected</span>`
+      : `<span class="v">${key === "mrp" ? "₹" : ""}${esc(f.value)}</span>`;
+    row.innerHTML = `<span class="k">${esc(FIELD_LABELS[key])}</span>${val}${pill}`;
+    if (f.detected && f.bbox) {
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      row.title = "Show this declaration on the image";
+      const spotlight = () => { state.activeEvidenceField = state.activeEvidenceField === key ? null : key; renderEvidence(images); };
+      row.addEventListener("click", spotlight);
+      row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); spotlight(); } });
+    }
+    extracted.appendChild(row);
+  });
+  if (!shown) extracted.innerHTML = `<div class="empty-note">No text extracted from this image.</div>`;
+
+  renderEvidenceOverlay(img, imgFields, overlay);
+
+  const captured = new Set(images.map(imageSide).filter(Boolean));
+  $("#ev-all-title").textContent = `All Images (${images.length})`;
+  $("#ev-all-chip").textContent = `${captured.size} / 6 captured`;
+  grid.innerHTML = "";
+  images.forEach((im, i) => {
+    const side = imageSide(im);
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.className = "ev-thumb" + (i === idx ? " selected" : "");
+    tile.innerHTML = `
+      <img src="${im.annotated_url}" alt="${esc(imageLabel(im, i))}">
+      <span class="ev-tick">${ICONS.check}</span>
+      <span class="ev-tag">${side ? esc(SIDE_LABELS[side]) : "✓"}</span>`;
+    tile.addEventListener("click", () => { state.evidenceIdx = i; renderEvidence(images); });
+    grid.appendChild(tile);
+  });
+  SIDES.filter((s) => !captured.has(s)).forEach((side) => {
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.className = "ev-add";
+    tile.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span>${SIDE_LABELS[side]}</span>`;
+    tile.addEventListener("click", () => retakeFlow(SIDE_LABELS[side]));
+    grid.appendChild(tile);
+  });
+}
+
+function renderEvidenceOverlay(img, fields, overlay) {
+  overlay.innerHTML = "";
+  const width = Number(img.quality?.width) || 0;
+  const height = Number(img.quality?.height) || 0;
+  if (!width || !height) return;
+  const addBox = (bbox, className, title) => {
+    if (!Array.isArray(bbox) || bbox.length !== 4) return;
+    const [x1, y1, x2, y2] = bbox.map(Number);
+    if (![x1, y1, x2, y2].every(Number.isFinite) || x2 <= x1 || y2 <= y1) return;
+    const box = document.createElement("span");
+    box.className = `evidence-box ${className}`;
+    box.style.left = `${(x1 / width) * 100}%`;
+    box.style.top = `${(y1 / height) * 100}%`;
+    box.style.width = `${((x2 - x1) / width) * 100}%`;
+    box.style.height = `${((y2 - y1) / height) * 100}%`;
+    box.title = title || "Detected OCR text";
+    overlay.appendChild(box);
+  };
+  if (state.showOcrBoxes) (img.boxes || []).slice(0, 200).forEach((box) => addBox(box.bbox, "ocr", `${box.text || "OCR text"} (${Math.round((box.confidence || 0) * 100)}%)`));
+  if (state.activeEvidenceField && fields[state.activeEvidenceField]?.bbox) {
+    addBox(fields[state.activeEvidenceField].bbox, "field", `${FIELD_LABELS[state.activeEvidenceField]} evidence`);
+  }
+}
+
+function stepEvidence(dir) {
+  const images = state.currentRun ? state.currentRun.images || [] : [];
+  if (!images.length) return;
+  state.evidenceIdx = ((state.evidenceIdx || 0) + dir + images.length) % images.length;
+  renderEvidence(images);
 }
 
 function markCurrentReportGenerated() {
@@ -704,6 +1175,8 @@ function markCurrentReportGenerated() {
   if (entry) {
     entry.reportGenerated = true;
     writeJSON(STORAGE_KEYS.history, state.history);
+    // Mirror to the shared database so supervisors see it.
+    if (entry.runId) authFetch(`/api/inspection/${entry.runId}/report`, { method: "POST" }).catch(() => {});
   }
 }
 
@@ -745,6 +1218,8 @@ function submitToSupervisor() {
   if (!entry) return;
   entry.submitted = true;
   writeJSON(STORAGE_KEYS.history, state.history);
+  // Mirror to the shared database so the case shows as submitted on the dashboard.
+  if (entry.runId) authFetch(`/api/inspection/${entry.runId}/submit`, { method: "POST" }).catch(() => {});
   $("#rp-submit-note").textContent = "Submitted to supervisor.";
   toast("Report submitted to supervisor");
   renderHome();
@@ -838,8 +1313,16 @@ async function downloadPdf() {
   doc.setFont("helvetica", "italic");
   doc.setFontSize(9);
   doc.setTextColor(107, 119, 135);
-  doc.text(doc.splitTextToSize(data.disclaimer || "", pageWidth - margin * 2), margin, y);
-  y += 40;
+  const discLines = doc.splitTextToSize(data.disclaimer || "", pageWidth - margin * 2);
+  doc.text(discLines, margin, y);
+  y += discLines.length * 12 + 6;
+  if (data.legal_notice) {
+    doc.setFontSize(8);
+    const legalLines = doc.splitTextToSize(data.legal_notice, pageWidth - margin * 2);
+    if (y + legalLines.length * 10 > 780) { doc.addPage(); y = 56; }
+    doc.text(legalLines, margin, y);
+    y += legalLines.length * 10 + 8;
+  }
 
   const firstImage = (data.images || [])[0];
   if (firstImage && firstImage.annotated_url) {

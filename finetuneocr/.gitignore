@@ -1,0 +1,55 @@
+# ============ CompliScan (.gitignore) ============
+# Everything your friend needs to run the app (source code,
+# requirements.txt, package.json + package-lock.json, rules/*.json,
+# README, start scripts) is TRACKED. Everything below is regenerable
+# on their laptop and stays out of the repo.
+
+# ---- Python virtual environments (recreated via `python -m venv venv`) ----
+venv/
+.venv/
+env/
+ENV/
+
+# Pyenv version pin (your laptop's Python; friend installs their own 3.12)
+.python-version
+
+# ---- Python bytecode / caches ----
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Node dependencies & build output (recreated via `npm install` / `npm run build`) ----
+node_modules/
+dist/
+build/
+*.local
+
+# ---- Vite / TS caches ----
+vite.config.*.timestamp-*
+*.tsbuildinfo
+
+# ---- Environment secrets (never commit these) ----
+.env
+.env.*
+!.env.example
+
+# ---- Logs & local temp files ----
+*.log
+*.tmp
+
+# ---- OS / editor junk ----
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ---- PaddleOCR / model caches (auto-downloaded on first run) ----
+.paddleocr/
