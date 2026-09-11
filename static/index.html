@@ -69,14 +69,23 @@
         <h1>Capture product</h1>
       </div>
       <div class="screen-content">
-        <div class="capture-hint" id="capture-hint">Start with front and back. The app will request a close-up only when evidence is insufficient.</div>
+        <div class="capture-hint" id="capture-hint">Add up to 6 photos of the package — front, back and close-ups of small print.</div>
 
-        <div class="section-title">Required <span class="section-sub">front &amp; back</span></div>
-        <div class="capture-grid" id="capture-grid-required"></div>
-        <div class="coverage-note" id="coverage-note"></div>
+        <div class="capture-actions">
+          <button class="btn btn-primary" id="btn-upload-photos">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="2.4" stroke="white" stroke-width="1.7"/><circle cx="8.3" cy="9.3" r="1.6" stroke="white" stroke-width="1.5"/><path d="m4 17 5-5 3.2 3.2L16 10.5l4 4.5" stroke="white" stroke-width="1.6" stroke-linejoin="round"/></svg>
+            Upload photos
+          </button>
+          <button class="btn btn-outline" id="btn-live-capture">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 8V6a2 2 0 0 1 2-2h2M4 16v2a2 2 0 0 0 2 2h2M20 8V6a2 2 0 0 0-2-2h-2M20 16v2a2 2 0 0 1-2 2h-2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/></svg>
+            Live capture
+          </button>
+        </div>
+        <input type="file" id="bulk-input" accept="image/*" multiple hidden>
+        <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
 
-        <div class="section-title">Additional <span class="section-sub">optional sides &amp; close-ups</span></div>
-        <div class="side-strip" id="side-strip"></div>
+        <div class="section-title">Selected photos <span class="section-sub" id="photo-count-sub"></span></div>
+        <div class="side-strip" id="photo-strip"></div>
 
       </div>
       <div class="capture-footer">
@@ -199,7 +208,7 @@
             <div class="cov-grid" id="sum-cov-grid"></div>
             <button class="list-row" id="btn-retake-sides">
               <div class="lr-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 8V6a2 2 0 0 1 2-2h2M4 16v2a2 2 0 0 0 2 2h2M20 8V6a2 2 0 0 0-2-2h-2M20 16v2a2 2 0 0 1-2 2h-2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/></svg></div>
-              <div class="lr-text">Retake missing sides</div>
+              <div class="lr-text">Add more photos</div>
               <svg class="lr-chev" width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m9 6 6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
           </div>

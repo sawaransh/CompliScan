@@ -484,7 +484,7 @@ async function vSettings(el) {
       <p class="sub">One service, two doors, one shared database</p>
       <div class="det-kv"><span class="k">Officer app</span><span class="v"><a href="/inspect">/inspect</a> — mobile scanning</span></div>
       <div class="det-kv"><span class="k">This dashboard</span><span class="v"><a href="/supervise">/supervise</a> — desktop supervision</span></div>
-      <div class="det-kv"><span class="k">Database</span><span class="v">SQLite · officers + scans in one store</span></div>
+      <div class="det-kv"><span class="k">Database</span><span class="v">MongoDB Atlas · officers + scans in one store</span></div>
       <div class="det-kv"><span class="k">Rule set</span><span class="v">${esc(health.rule_set.rule_set_id)} — ${esc(health.rule_set.title)}</span></div>
       <div class="det-kv"><span class="k">OCR service</span><span class="v">${health.ocr_service && health.ocr_service.reachable ? "reachable (" + esc(health.ocr_service.service || "OCR") + ")" : "unreachable"}</span></div>
     </div>
@@ -501,7 +501,7 @@ async function vSettings(el) {
     <div class="card">
       <h2>Live Data Pipeline</h2>
       <p class="sub">Everything here is live — no demo data</p>
-      <div class="det-kv"><span class="k">Officer scans</span><span class="v">/inspect → SQLite scans table → this dashboard</span></div>
+      <div class="det-kv"><span class="k">Officer scans</span><span class="v">/inspect → MongoDB scans collection → this dashboard (live)</span></div>
       <div class="det-kv"><span class="k">Officer roster</span><span class="v">Team Management → officers table → login checks</span></div>
       <div class="det-kv"><span class="k">Refresh</span><span class="v">Views refetch on every navigation and whenever this tab regains focus</span></div>
     </div>`;
@@ -545,12 +545,15 @@ async function boot() {
     localStorage.removeItem(SESSION_KEY);
     location.href = "/login";
   });
-  // Live board: refetch list views whenever the tab regains focus.
+  // Live board: refetch list views whenever the tab regains focus + poll every 12s.
   window.addEventListener("focus", () => {
     if (["dashboard", "reports", "products", "analytics", "map", "team"].includes(state.view)) {
       navigate(state.view);
     }
   });
+  setInterval(() => {
+    if (["dashboard", "reports", "map"].includes(state.view)) navigate(state.view);
+  }, 12000);
   navigate("dashboard");
 }
 

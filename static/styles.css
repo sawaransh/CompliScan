@@ -448,6 +448,14 @@ a { color: inherit; }
   color: #fff; font-size: 10.5px; padding: 14px 8px 6px; text-align: center;
 }
 
+.capture-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 4px 0 6px; }
+.capture-actions .btn { padding: 16px 12px; }
+.cov-photo {
+  width: 46px; height: 46px; border-radius: 12px; overflow: hidden;
+  border: 1px solid var(--border-soft); background: var(--surface); flex: 0 0 auto;
+}
+.cov-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
 /* Compact horizontal strip: optional side slots + close-ups + add tile */
 .side-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
 .mini-slot {

@@ -1,188 +1,90 @@
 from __future__ import annotations
-
-import hashlib
-import json
-import secrets
-import sqlite3
+import hashlib, secrets
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from typing import Optional
 
-from .config import ROOT, RUN_DIR
+from pymongo import MongoClient, ASCENDING
 
-DB_PATH = ROOT / "data" / "compliscan.db"
-SESSION_DAYS = 7
+from .config import MONGODB_URI, MONGODB_DB_NAME
+
+_session_lifetime = timedelta(days=7)
 DEFAULT_SUPERVISOR_ID = "SUP001"
 DEFAULT_SUPERVISOR_PASSWORD = "admin123"
 
+_mongo_client: Optional[MongoClient] = None
+_mongo_db: Optional = None
 
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    return conn
+def _client() -> MongoClient:
+    global _mongo_client, _mongo_db
+    if _mongo_client is None:
+        _mongo_client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+        _mongo_db = _mongo_client[MONGODB_DB_NAME]
+        _ensure_indexes()
+    return _mongo_client
 
+def _get_db():
+    _client()
+    return _mongo_db
 
-def init_db() -> None:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = _connect()
-    conn.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS officers (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            dept TEXT NOT NULL DEFAULT 'Legal Metrology Department',
-            created_at TEXT NOT NULL,
-            last_seen TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS scans (
-            run_id TEXT PRIMARY KEY,
-            inspection_id TEXT NOT NULL,
-            officer_id TEXT,
-            officer_name TEXT NOT NULL DEFAULT 'Unknown',
-            date TEXT NOT NULL,
-            product TEXT NOT NULL DEFAULT 'Unnamed product',
-            brand TEXT NOT NULL DEFAULT 'Unknown brand',
-            city TEXT NOT NULL DEFAULT 'Unknown',
-            lat REAL,
-            lng REAL,
-            status TEXT NOT NULL DEFAULT 'REVIEW',
-            passed INTEGER NOT NULL DEFAULT 0,
-            failed INTEGER NOT NULL DEFAULT 0,
-            review INTEGER NOT NULL DEFAULT 0,
-            image_count INTEGER NOT NULL DEFAULT 0,
-            has_result INTEGER NOT NULL DEFAULT 0,
-            report_generated INTEGER NOT NULL DEFAULT 0,
-            submitted INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE INDEX IF NOT EXISTS idx_scans_date ON scans(date);
-        CREATE INDEX IF NOT EXISTS idx_scans_officer ON scans(officer_id);
-        CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status);
-        CREATE TABLE IF NOT EXISTS users (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            role TEXT NOT NULL CHECK (role IN ('officer', 'supervisor')),
-            password_hash TEXT,
-            created_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS sessions (
-            token TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            role TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            expires_at TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
-        """
-    )
-    conn.commit()
-    # Columns added after the first release (idempotent on existing databases).
-    for ddl in (
-        "ALTER TABLE scans ADD COLUMN report_generated INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE scans ADD COLUMN submitted INTEGER NOT NULL DEFAULT 0",
-    ):
-        try:
-            conn.execute(ddl)
-        except Exception:
-            pass
-    conn.commit()
-    conn.close()
+def _officers():
+    return _get_db()["officers"]
 
+def _scans():
+    return _get_db()["scans"]
+
+def _users():
+    return _get_db()["users"]
+
+def _sessions():
+    return _get_db()["sessions"]
+
+def _ensure_indexes() -> None:
+    _sessions().create_index("expires_at", expireAfterSeconds=0)
+    _scans().create_index("run_id", unique=True)
+    _scans().create_index([("officer_id", ASCENDING)])
+    _scans().create_index([("date", ASCENDING)])
+    _scans().create_index([("status", ASCENDING)])
+    _scans().create_index([("brand", ASCENDING)])
+    _scans().create_index([("city", ASCENDING)])
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+def init_db() -> None:
+    _ensure_indexes()
+    if _users().count_documents({"role": "supervisor"}) == 0:
+        _users().insert_one({
+            "_id": DEFAULT_SUPERVISOR_ID,
+            "name": "Supervisor",
+            "role": "supervisor",
+            "password_hash": hash_password(DEFAULT_SUPERVISOR_PASSWORD),
+            "created_at": now_iso(),
+        })
+
+def backfill_runs() -> int:
+    return 0
 
 def upsert_officer(officer_id: str, name: str, dept: str = "Legal Metrology Department") -> None:
     if not officer_id:
         return
-    conn = _connect()
-    row = conn.execute("SELECT id FROM officers WHERE id = ?", (officer_id,)).fetchone()
-    if row:
-        conn.execute(
-            "UPDATE officers SET name = ?, dept = ?, last_seen = ? WHERE id = ?",
-            (name or officer_id, dept or "Legal Metrology Department", now_iso(), officer_id),
-        )
-    else:
-        conn.execute(
-            "INSERT INTO officers (id, name, dept, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
-            (officer_id, name or officer_id, dept or "Legal Metrology Department", now_iso(), now_iso()),
-        )
-    conn.commit()
-    conn.close()
-
+    _officers().update_one(
+        {"_id": officer_id},
+        {"$set": {"name": name or officer_id, "dept": dept or "Legal Metrology Department", "last_seen": now_iso()}},
+        upsert=True,
+    )
 
 def insert_scan(record: dict) -> None:
-    conn = _connect()
-    conn.execute(
-        """INSERT OR REPLACE INTO scans
-           (run_id, inspection_id, officer_id, officer_name, date, product, brand,
-            city, lat, lng, status, passed, failed, review, image_count, has_result)
-           VALUES (:run_id, :inspection_id, :officer_id, :officer_name, :date, :product, :brand,
-                   :city, :lat, :lng, :status, :passed, :failed, :review, :image_count, :has_result)""",
-        record,
-    )
-    conn.commit()
-    conn.close()
+    doc = {k: v for k, v in record.items()}
+    doc["_id"] = record["run_id"]
+    doc.setdefault("report_generated", 0)
+    doc.setdefault("submitted", 0)
+    doc.setdefault("has_result", 1)
+    _scans().replace_one({"_id": record["run_id"]}, doc, upsert=True)
 
-
-def backfill_runs() -> int:
-    """Import pre-database data/runs/*/result.json files. Returns count imported."""
-    if not RUN_DIR.exists():
-        return 0
-    conn = _connect()
-    existing = {r["run_id"] for r in conn.execute("SELECT run_id FROM scans")}
-    conn.close()
-    imported = 0
-    for result_file in sorted(RUN_DIR.glob("*/result.json")):
-        run_id = result_file.parent.name
-        if run_id in existing:
-            continue
-        try:
-            data = json.loads(result_file.read_text())
-        except Exception:
-            continue
-        c = data.get("compliance", {})
-        fields = c.get("fields", {}) or {}
-        summary = c.get("summary", {}) or {}
-        manufacturer = (fields.get("manufacturer") or {}).get("value")
-        product = (fields.get("product_name") or {}).get("value")
-        try:
-            date = datetime.fromtimestamp(result_file.stat().st_mtime, tz=timezone.utc).isoformat()
-        except Exception:
-            date = now_iso()
-        insert_scan({
-            "run_id": run_id,
-            "inspection_id": data.get("inspection_id", f"LM-DEMO-{run_id.upper()}"),
-            "officer_id": None,
-            "officer_name": "Unknown",
-            "date": date,
-            "product": product or "Unnamed product",
-            "brand": manufacturer or "Unknown brand",
-            "city": "Unknown",
-            "lat": None,
-            "lng": None,
-            "status": c.get("overall_status", "REVIEW"),
-            "passed": summary.get("passed", 0),
-            "failed": summary.get("failed", 0),
-            "review": summary.get("review", 0),
-            "image_count": len(data.get("images", [])),
-            "has_result": 1,
-        })
-        imported += 1
-    return imported
-
-
-def dicts(rows) -> list[dict]:
-    return [dict(r) for r in rows]
-
-
-# ============================================================
-# Auth: password hashing, users, sessions
-# ============================================================
 def hash_password(password: str) -> str:
     salt = secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 200_000).hex()
     return f"pbkdf2${salt}${digest}"
-
 
 def check_password(password: str, stored: str | None) -> bool:
     try:
@@ -194,64 +96,40 @@ def check_password(password: str, stored: str | None) -> bool:
     except Exception:
         return False
 
-
 def ensure_default_supervisor() -> bool:
-    """Create the initial supervisor login. Returns True on first creation."""
-    conn = _connect()
-    row = conn.execute("SELECT id FROM users WHERE id = ?", (DEFAULT_SUPERVISOR_ID,)).fetchone()
-    if row:
-        conn.close()
-        return False
-    conn.execute(
-        "INSERT INTO users (id, name, role, password_hash, created_at) VALUES (?, ?, 'supervisor', ?, ?)",
-        (DEFAULT_SUPERVISOR_ID, "Supervisor", hash_password(DEFAULT_SUPERVISOR_PASSWORD), now_iso()),
-    )
-    conn.commit()
-    conn.close()
-    return True
-
+    return _users().count_documents({"_id": DEFAULT_SUPERVISOR_ID}) == 0
 
 def verify_officer(officer_id: str, name: str) -> dict | None:
-    """Officers authenticate with registry ID + full name (field-device friendly)."""
-    conn = _connect()
-    row = conn.execute("SELECT id, name, dept FROM officers WHERE id = ?", (officer_id,)).fetchone()
-    conn.close()
+    row = _officers().find_one({"_id": officer_id})
     if not row or row["name"].strip().lower() != (name or "").strip().lower():
         return None
-    return {"id": row["id"], "name": row["name"], "dept": row["dept"]}
-
+    return {"id": row["_id"], "name": row["name"], "dept": row.get("dept", "Legal Metrology Department")}
 
 def verify_supervisor(supervisor_id: str, password: str) -> dict | None:
-    conn = _connect()
-    row = conn.execute("SELECT id, name, password_hash FROM users WHERE id = ? AND role = 'supervisor'", (supervisor_id,)).fetchone()
-    conn.close()
-    if not row or not check_password(password or "", row["password_hash"]):
+    row = _users().find_one({"_id": supervisor_id, "role": "supervisor"})
+    if not row or not check_password(password or "", row.get("password_hash")):
         return None
-    return {"id": row["id"], "name": row["name"]}
-
+    return {"id": row["_id"], "name": row["name"]}
 
 def create_session(user_id: str, role: str) -> str:
     token = secrets.token_hex(32)
     now = datetime.now(timezone.utc)
-    conn = _connect()
-    conn.execute(
-        "INSERT INTO sessions (token, user_id, role, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
-        (token, user_id, role, now.isoformat(), (now + timedelta(days=SESSION_DAYS)).isoformat()),
-    )
-    conn.commit()
-    conn.close()
+    _sessions().insert_one({
+        "_id": token,
+        "user_id": user_id,
+        "role": role,
+        "created_at": now.isoformat(),
+        "expires_at": (now + _session_lifetime).isoformat(),
+    })
     return token
 
-
 def get_session(token: str) -> dict | None:
-    conn = _connect()
-    row = conn.execute("SELECT token, user_id, role, expires_at FROM sessions WHERE token = ?", (token,)).fetchone()
-    conn.close()
+    row = _sessions().find_one({"_id": token})
     if not row:
         return None
     try:
         if datetime.fromisoformat(row["expires_at"]) < datetime.now(timezone.utc):
-            delete_session(token)
+            _sessions().delete_one({"_id": token})
             return None
     except Exception:
         return None
@@ -260,40 +138,173 @@ def get_session(token: str) -> dict | None:
         return None
     return {"user_id": row["user_id"], "role": row["role"], **identity}
 
-
 def session_identity(user_id: str, role: str) -> dict | None:
-    """Fresh display identity for a session owner (dept included for officers)."""
-    conn = _connect()
     if role == "officer":
-        row = conn.execute("SELECT id, name, dept FROM officers WHERE id = ?", (user_id,)).fetchone()
+        row = _officers().find_one({"_id": user_id})
     else:
-        row = conn.execute("SELECT id, name FROM users WHERE id = ? AND role = 'supervisor'", (user_id,)).fetchone()
-    conn.close()
+        row = _users().find_one({"_id": user_id, "role": "supervisor"})
     if not row:
         return None
-    identity = {"id": row["id"], "name": row["name"]}
+    identity = {"id": row["_id"], "name": row["name"]}
     if role == "officer":
-        identity["dept"] = row["dept"]
+        identity["dept"] = row.get("dept", "Legal Metrology Department")
     return identity
 
-
 def delete_session(token: str) -> None:
-    conn = _connect()
-    conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
-    conn.commit()
-    conn.close()
-
+    _sessions().delete_one({"_id": token})
 
 def change_supervisor_password(supervisor_id: str, current: str, new: str) -> bool:
-    """Returns True on success; False when the current password is wrong."""
-    conn = _connect()
-    row = conn.execute(
-        "SELECT password_hash FROM users WHERE id = ? AND role = 'supervisor'", (supervisor_id,)).fetchone()
-    if not row or not check_password(current or "", row["password_hash"]):
-        conn.close()
+    row = _users().find_one({"_id": supervisor_id, "role": "supervisor"})
+    if not row or not check_password(current or "", row.get("password_hash", "")):
         return False
-    conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(new), supervisor_id))
-    conn.execute("DELETE FROM sessions WHERE user_id = ?", (supervisor_id,))
-    conn.commit()
-    conn.close()
+    _users().update_one({"_id": supervisor_id}, {"$set": {"password_hash": hash_password(new)}})
+    _sessions().delete_many({"user_id": supervisor_id})
     return True
+
+def flag_scan(run_id: str, column: str) -> dict:
+    if column not in ("report_generated", "submitted"):
+        raise ValueError("Unknown flag")
+    result = _scans().update_one({"_id": run_id}, {"$set": {column: 1}})
+    if result.matched_count == 0:
+        raise RuntimeError("Inspection not found")
+    return {"status": "ok", column: 1}
+
+def get_scan(run_id: str) -> dict | None:
+    row = _scans().find_one({"_id": run_id})
+    if not row:
+        return None
+    row = dict(row)
+    row["run_id"] = row.pop("_id")
+    return row
+
+def scan_exists(run_id: str) -> bool:
+    return _scans().find_one({"_id": run_id}) is not None
+
+def get_scans(status: str = "all", q: str = "", limit: int = 200) -> list[dict]:
+    query = {}
+    if status.upper() in ("COMPLIANT", "NON-COMPLIANT", "REVIEW"):
+        query["status"] = status.upper()
+    if q.strip():
+        query["$or"] = [
+            {"product": {"$regex": q.strip(), "$options": "i"}},
+            {"brand": {"$regex": q.strip(), "$options": "i"}},
+            {"officer_name": {"$regex": q.strip(), "$options": "i"}},
+            {"city": {"$regex": q.strip(), "$options": "i"}},
+            {"inspection_id": {"$regex": q.strip(), "$options": "i"}},
+        ]
+    rows = list(_scans().find(query).sort("date", -1).limit(max(1, min(500, limit))))
+    out = []
+    for r in rows:
+        doc = dict(r)
+        doc["run_id"] = doc.pop("_id")
+        out.append(doc)
+    return out
+
+def get_scan_detail(run_id: str) -> dict | None:
+    row = _scans().find_one({"_id": run_id})
+    if not row:
+        return None
+    doc = dict(row)
+    doc["run_id"] = doc.pop("_id")
+    return doc
+
+def get_map_pins() -> list[dict]:
+    rows = list(_scans().find({"lat": {"$ne": None}, "lng": {"$ne": None}}).sort("date", -1).limit(500))
+    out = []
+    for r in rows:
+        doc = dict(r)
+        doc["run_id"] = doc.pop("_id")
+        out.append(doc)
+    return out
+
+def get_brands(limit: int = 10) -> list[dict]:
+    pipeline = [
+        {"$group": {"_id": "$brand", "total": {"$sum": 1}, "violations": {"$sum": {"$cond": [{"$eq": ["$status", "NON-COMPLIANT"]}, 1, 0]}}}},
+        {"$sort": {"violations": -1, "total": -1}},
+        {"$limit": max(1, min(50, limit))},
+    ]
+    rows = list(_scans().aggregate(pipeline))
+    return [{"brand": r["_id"], "total": r["total"], "violations": r["violations"]} for r in rows]
+
+def get_locations() -> list[dict]:
+    pipeline = [
+        {"$group": {"_id": "$city", "total": {"$sum": 1}, "violations": {"$sum": {"$cond": [{"$eq": ["$status", "NON-COMPLIANT"]}, 1, 0]}}}},
+        {"$sort": {"violations": -1}},
+    ]
+    rows = list(_scans().aggregate(pipeline))
+    return [{"city": r["_id"], "total": r["total"], "violations": r["violations"]} for r in rows]
+
+def get_officer_scans(officer_id: str, status: str = "all", q: str = "", limit: int = 200) -> list[dict]:
+    query: dict = {"officer_id": officer_id}
+    if status.upper() in ("COMPLIANT", "NON-COMPLIANT", "REVIEW"):
+        query["status"] = status.upper()
+    if q.strip():
+        qr = {"$regex": q.strip(), "$options": "i"}
+        query["$or"] = [{"product": qr}, {"brand": qr}, {"city": qr}, {"inspection_id": qr}]
+        # $or must be at top level with officer_id – use $and
+        query = {"$and": [{"officer_id": officer_id}, {"$or": [{"product": qr}, {"brand": qr}, {"city": qr}, {"inspection_id": qr}]}]}
+        if status.upper() in ("COMPLIANT", "NON-COMPLIANT", "REVIEW"):
+            query["$and"].append({"status": status.upper()})
+    rows = list(_scans().find(query).sort("date", -1).limit(max(1, min(500, limit))))
+    out = []
+    for r in rows:
+        doc = dict(r)
+        doc["run_id"] = doc.pop("_id")
+        out.append(doc)
+    return out
+
+def get_officer_overview(officer_id: str) -> dict:
+    total = _scans().count_documents({"officer_id": officer_id})
+    violations = _scans().count_documents({"officer_id": officer_id, "status": "NON-COMPLIANT"})
+    compliant = _scans().count_documents({"officer_id": officer_id, "status": "COMPLIANT"})
+    pending = _scans().count_documents({"officer_id": officer_id, "submitted": {"$ne": 1}})
+    return {"total_scans": total, "violations": violations, "compliant": compliant, "pending": pending}
+
+def get_officers() -> list[dict]:
+    pipeline = [
+        {"$lookup": {"from": "scans", "localField": "_id", "foreignField": "officer_id", "as": "scans"}},
+        {"$addFields": {
+            "scans_count": {"$size": "$scans"},
+            "violations": {"$sum": {"$cond": [{"$eq": ["$scans.status", "NON-COMPLIANT"]}, 1, 0]}},
+            "compliant": {"$sum": {"$cond": [{"$eq": ["$scans.status", "COMPLIANT"]}, 1, 0]}},
+        }},
+        {"$project": {"scans": 0}},
+        {"$sort": {"scans_count": -1}},
+    ]
+    rows = list(_officers().aggregate(pipeline))
+    out = []
+    for r in rows:
+        doc = dict(r)
+        doc["id"] = doc.pop("_id")
+        out.append(doc)
+    return out
+
+def officer_exists(officer_id: str) -> bool:
+    return _officers().find_one({"_id": officer_id}) is not None
+
+def add_officer(officer_id: str, name: str, dept: str = "Legal Metrology Department") -> None:
+    upsert_officer(officer_id, name, dept)
+
+def remove_officer(officer_id: str) -> None:
+    _officers().delete_one({"_id": officer_id})
+    _scans().update_many({"officer_id": officer_id}, {"$set": {"officer_id": None}})
+
+def get_dashboard_overview() -> dict:
+    total = _scans().count_documents({})
+    violations = _scans().count_documents({"status": "NON-COMPLIANT"})
+    compliant = _scans().count_documents({"status": "COMPLIANT"})
+    officials = _officers().count_documents({})
+    return {"total_scans": total, "violations": violations, "compliant": compliant, "officials": officials}
+
+def get_dashboard_trends(days: int = 7) -> dict:
+    from datetime import timedelta
+    days = max(1, min(30, days))
+    today = datetime.now(timezone.utc).date()
+    labels, comp, noncomp = [], [], []
+    for i in range(days - 1, -1, -1):
+        day = today - timedelta(days=i)
+        day_str = day.isoformat()
+        labels.append(day.strftime("%d %b"))
+        comp.append(_scans().count_documents({"date": {"$gte": day_str, "$lt": (day + timedelta(days=1)).isoformat()}, "status": "COMPLIANT"}))
+        noncomp.append(_scans().count_documents({"date": {"$gte": day_str, "$lt": (day + timedelta(days=1)).isoformat()}, "status": "NON-COMPLIANT"}))
+    return {"labels": labels, "compliant": comp, "non_compliant": noncomp}

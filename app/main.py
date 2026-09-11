@@ -1,11 +1,12 @@
 from __future__ import annotations
 import json, shutil, uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from . import db
+from . import storage as cloud_store
 from .compliance import evaluate, load_rules
 from .config import RULES_PATH, RUN_DIR, STATIC_DIR, UPLOAD_DIR
 from .evidence import annotate
@@ -27,7 +28,7 @@ app.mount("/files", StaticFiles(directory=str(RUN_DIR)), name="files")
 db.init_db()
 db.backfill_runs()
 if db.ensure_default_supervisor():
-    print(f"[auth] default supervisor login: {db.DEFAULT_SUPERVISOR_ID} / {db.DEFAULT_SUPERVISOR_PASSWORD}  (change after first login)")
+    print(f"[auth] default supervisor login: SUP001 / admin123  (change after first login)")
 
 SUPERVISE_DIR = STATIC_DIR / "supervise"
 
@@ -143,7 +144,15 @@ async def scan(
         quality["readability"] = assess_readability(image, boxes)
         annotated_name = f"annotated_{idx}.jpg"
         annotate(source_path, boxes, out_dir/annotated_name, fields)
-        image_results.append({"filename": upload.filename, "image_id": f"image_{idx}", "backend": used_backend, "quality": quality, "boxes": boxes, "fields": fields, "original_url": f"/files/{run_id}/{original_name}", "annotated_url": f"/files/{run_id}/{annotated_name}"})
+        # Cloudinary (web deployment) — upload evidence so every device can see it.
+        # Local disk stays as fallback when CLOUDINARY_URL is not set.
+        if cloud_store.is_cloudinary_enabled():
+            orig_url = cloud_store.upload_image(out_dir / original_name, run_id, original_name) or f"/files/{run_id}/{original_name}"
+            ann_url = cloud_store.upload_image(out_dir / annotated_name, run_id, annotated_name) or f"/files/{run_id}/{annotated_name}"
+        else:
+            orig_url = f"/files/{run_id}/{original_name}"
+            ann_url = f"/files/{run_id}/{annotated_name}"
+        image_results.append({"filename": upload.filename, "image_id": f"image_{idx}", "backend": used_backend, "quality": quality, "boxes": boxes, "fields": fields, "original_url": orig_url, "annotated_url": ann_url})
     if not image_results:
         return {"error": "No readable images were uploaded.", "warnings": warnings}
     rules = load_rules(RULES_PATH)
@@ -152,6 +161,9 @@ async def scan(
     for item in image_results:
         response["images"].append({"filename":item["filename"], "backend":item["backend"], "quality":item["quality"], "boxes":[b.to_dict() for b in item["boxes"]], "fields":{k:v for k,v in item["fields"].items() if not k.startswith("_")}, "original_url":item["original_url"], "annotated_url":item["annotated_url"]})
     (out_dir/"result.json").write_text(json.dumps(response, indent=2, ensure_ascii=False))
+    # Mirror result.json to Cloudinary when enabled (survives ephemeral disk)
+    if cloud_store.is_cloudinary_enabled():
+        cloud_store.upload_result_json(out_dir / "result.json", run_id)
     response["result_file"] = f"/files/{run_id}/result.json"
 
     # ---- shared database: attribution comes from the signed-in session ----
@@ -195,6 +207,15 @@ async def scan(
         "failed": compliance.get("summary", {}).get("failed", 0),
         "review": compliance.get("summary", {}).get("review", 0),
         "image_count": len(response["images"]),
+        # Persist slim result in MongoDB so Cloudinary images survive ephemeral disk
+        "result": {
+            "inspection_id": response["inspection_id"],
+            "disclaimer": response["disclaimer"],
+            "legal_notice": response.get("legal_notice"),
+            "warnings": response["warnings"],
+            "compliance": compliance,
+            "images": [{"filename": im["filename"], "backend": im["backend"], "quality": im["quality"], "annotated_url": im["annotated_url"], "original_url": im["original_url"], "fields": im["fields"]} for im in response["images"]],
+        },
         "has_result": 1,
     })
     return response
@@ -223,18 +244,17 @@ def get_result(run_id: str, sess: dict = Depends(require_roles("officer", "super
 def _flag_scan(run_id: str, sess: dict, column: str) -> dict:
     if column not in ("report_generated", "submitted"):
         raise HTTPException(status_code=400, detail="Unknown flag")
-    conn = db._connect()
-    row = conn.execute("SELECT run_id, officer_id FROM scans WHERE run_id = ?", (run_id,)).fetchone()
+    row = db.get_scan(run_id)
     if not row:
-        conn.close()
         raise HTTPException(status_code=404, detail="Inspection not found")
-    if sess["role"] == "officer" and row["officer_id"] != sess["user_id"]:
-        conn.close()
+    if sess["role"] == "officer" and row.get("officer_id") != sess["user_id"]:
         raise HTTPException(status_code=403, detail="Not your inspection")
-    conn.execute(f"UPDATE scans SET {column} = 1 WHERE run_id = ?", (run_id,))
-    conn.commit()
-    conn.close()
-    return {"status": "ok", column: 1}
+    try:
+        return db.flag_scan(run_id, column)
+    except RuntimeError:
+        raise HTTPException(status_code=404, detail="Inspection not found")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to update scan")
 
 @app.post("/api/inspection/{run_id}/report")
 def api_mark_report(run_id: str, sess: dict = Depends(require_roles("officer", "supervisor"))):
@@ -248,65 +268,66 @@ def api_mark_submitted(run_id: str, sess: dict = Depends(require_roles("officer"
 
 
 # ============================================================
+# Officer — per-officer history synced to MongoDB
+# ============================================================
+@app.get("/api/officer/scans")
+def api_officer_scans(status: str = "all", q: str = "", limit: int = 200, sess: dict = Depends(require_roles("officer"))):
+    return {"scans": db.get_officer_scans(sess["user_id"], status, q, limit)}
+
+@app.get("/api/officer/overview")
+def api_officer_overview(sess: dict = Depends(require_roles("officer"))):
+    return db.get_officer_overview(sess["user_id"])
+
+@app.get("/api/officer/scans/{run_id}")
+def api_officer_scan_detail(run_id: str, sess: dict = Depends(require_roles("officer"))):
+    row = db.get_scan(run_id)
+    if not row or row.get("officer_id") != sess["user_id"]:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    detail = db.get_scan_detail(run_id)
+    if not detail:
+        return {"error": "Scan not found"}
+    result_file = RUN_DIR / run_id / "result.json"
+    if result_file.exists():
+        try:
+            full = json.loads(result_file.read_text())
+            detail["result"] = {
+                "inspection_id": full.get("inspection_id"),
+                "disclaimer": full.get("disclaimer"),
+                "legal_notice": full.get("legal_notice"),
+                "warnings": full.get("warnings", []),
+                "compliance": full.get("compliance"),
+                "images": [{k: img.get(k) for k in ("filename", "backend", "quality", "annotated_url", "original_url", "fields")} for img in full.get("images", [])],
+            }
+        except Exception:
+            detail["result"] = detail.get("result")
+    else:
+        # Fallback to MongoDB-persisted result (survives Cloudinary/ephemeral disk)
+        detail["result"] = detail.get("result")
+    return detail
+
+# ============================================================
 # Supervisor dashboard APIs — same database the officers write to
 # ============================================================
 @app.get("/api/dashboard/overview")
 def api_overview(_sup: dict = Depends(require_roles("supervisor"))):
-    conn = db._connect()
-    total = conn.execute("SELECT COUNT(*) c FROM scans").fetchone()["c"]
-    violations = conn.execute("SELECT COUNT(*) c FROM scans WHERE status = 'NON-COMPLIANT'").fetchone()["c"]
-    compliant = conn.execute("SELECT COUNT(*) c FROM scans WHERE status = 'COMPLIANT'").fetchone()["c"]
-    officials = conn.execute("SELECT COUNT(*) c FROM officers").fetchone()["c"]
-    conn.close()
-    return {"total_scans": total, "violations": violations, "compliant": compliant, "officials": officials}
+    return db.get_dashboard_overview()
 
 
 @app.get("/api/dashboard/trends")
 def api_trends(days: int = 7, _sup: dict = Depends(require_roles("supervisor"))):
-    from datetime import timedelta
-    days = max(1, min(30, days))
-    today = datetime.now(timezone.utc).date()
-    labels, comp, noncomp = [], [], []
-    conn = db._connect()
-    for i in range(days - 1, -1, -1):
-        day = today - timedelta(days=i)
-        day_str = day.isoformat()
-        labels.append(day.strftime("%d %b"))
-        comp.append(conn.execute(
-            "SELECT COUNT(*) c FROM scans WHERE date LIKE ? AND status = 'COMPLIANT'", (day_str + "%",)).fetchone()["c"])
-        noncomp.append(conn.execute(
-            "SELECT COUNT(*) c FROM scans WHERE date LIKE ? AND status = 'NON-COMPLIANT'", (day_str + "%",)).fetchone()["c"])
-    conn.close()
-    return {"labels": labels, "compliant": comp, "non_compliant": noncomp}
+    return db.get_dashboard_trends(days)
 
 
 @app.get("/api/dashboard/scans")
 def api_scans(status: str = "all", q: str = "", limit: int = 200, _sup: dict = Depends(require_roles("supervisor"))):
-    query = "SELECT * FROM scans WHERE 1=1"
-    params: list = []
-    if status.upper() in ("COMPLIANT", "NON-COMPLIANT", "REVIEW"):
-        query += " AND status = ?"
-        params.append(status.upper())
-    if q.strip():
-        query += " AND (product LIKE ? OR brand LIKE ? OR officer_name LIKE ? OR city LIKE ? OR inspection_id LIKE ?)"
-        like = f"%{q.strip()}%"
-        params.extend([like] * 5)
-    query += " ORDER BY date DESC LIMIT ?"
-    params.append(max(1, min(500, limit)))
-    conn = db._connect()
-    rows = db.dicts(conn.execute(query, params))
-    conn.close()
-    return {"scans": rows}
+    return {"scans": db.get_scans(status, q, limit)}
 
 
 @app.get("/api/dashboard/scans/{run_id}")
 def api_scan_detail(run_id: str, _sup: dict = Depends(require_roles("supervisor"))):
-    conn = db._connect()
-    row = conn.execute("SELECT * FROM scans WHERE run_id = ?", (run_id,)).fetchone()
-    conn.close()
-    if not row:
+    detail = db.get_scan_detail(run_id)
+    if not detail:
         return {"error": "Scan not found"}
-    detail = dict(row)
     result_file = RUN_DIR / run_id / "result.json"
     if result_file.exists():
         try:
@@ -318,76 +339,40 @@ def api_scan_detail(run_id: str, _sup: dict = Depends(require_roles("supervisor"
                 "warnings": full.get("warnings", []),
                 "compliance": full.get("compliance"),
                 "images": [
-                    {k: img.get(k) for k in ("filename", "backend", "quality", "annotated_url", "fields")}
+                    {k: img.get(k) for k in ("filename", "backend", "quality", "annotated_url", "original_url", "fields")}
                     for img in full.get("images", [])
                 ],
             }
-            # similar past violations: same brand flagged before, excluding self
-            conn = db._connect()
-            similar = db.dicts(conn.execute(
-                """SELECT run_id, inspection_id, date, product, city, officer_name, status
-                   FROM scans WHERE brand = ? AND status = 'NON-COMPLIANT' AND run_id != ?
-                   ORDER BY date DESC LIMIT 5""",
-                (detail["brand"], run_id)))
-            conn.close()
-            detail["similar"] = similar
         except Exception:
-            detail["result"] = None
-            detail["similar"] = []
+            detail["result"] = detail.get("result")
     else:
-        detail["result"] = None
-        detail["similar"] = []
+        detail["result"] = detail.get("result")
+    # Always compute similar from MongoDB (works even when file missing)
+    try:
+        detail["similar"] = [s for s in db.get_scans("NON-COMPLIANT") if s.get("brand") == detail.get("brand") and s.get("run_id") != run_id][:5]
+    except Exception:
+        detail["similar"] = detail.get("similar") or []
     return detail
 
 
 @app.get("/api/dashboard/map-pins")
 def api_map_pins(_sup: dict = Depends(require_roles("supervisor"))):
-    """Every scan with GPS → pin on the real map. Supports dashboard filters."""
-    conn = db._connect()
-    rows = db.dicts(conn.execute(
-        """SELECT run_id, inspection_id, product, brand, city, lat, lng, status, date, officer_name
-           FROM scans WHERE lat IS NOT NULL AND lng IS NOT NULL
-           ORDER BY date DESC LIMIT 500"""))
-    conn.close()
-    return {"pins": rows}
+    return {"pins": db.get_map_pins()}
 
 
 @app.get("/api/dashboard/brands")
 def api_brands(limit: int = 10, _sup: dict = Depends(require_roles("supervisor"))):
-    conn = db._connect()
-    rows = db.dicts(conn.execute(
-        """SELECT brand, COUNT(*) total,
-                  SUM(CASE WHEN status = 'NON-COMPLIANT' THEN 1 ELSE 0 END) violations
-           FROM scans GROUP BY brand ORDER BY violations DESC, total DESC LIMIT ?""",
-        (max(1, min(50, limit)),)))
-    conn.close()
-    return {"brands": rows}
+    return {"brands": db.get_brands(limit)}
 
 
 @app.get("/api/dashboard/locations")
 def api_locations(_sup: dict = Depends(require_roles("supervisor"))):
-    conn = db._connect()
-    rows = db.dicts(conn.execute(
-        """SELECT city, COUNT(*) total,
-                  SUM(CASE WHEN status = 'NON-COMPLIANT' THEN 1 ELSE 0 END) violations,
-                  AVG(lat) lat, AVG(lng) lng
-           FROM scans GROUP BY city ORDER BY violations DESC"""))
-    conn.close()
-    return {"locations": rows}
+    return {"locations": db.get_locations()}
 
 
 @app.get("/api/dashboard/officers")
 def api_officers(_sup: dict = Depends(require_roles("supervisor"))):
-    conn = db._connect()
-    rows = db.dicts(conn.execute(
-        """SELECT o.id, o.name, o.dept, o.last_seen,
-                  COUNT(s.run_id) scans,
-                  SUM(CASE WHEN s.status = 'NON-COMPLIANT' THEN 1 ELSE 0 END) violations,
-                  SUM(CASE WHEN s.status = 'COMPLIANT' THEN 1 ELSE 0 END) compliant
-           FROM officers o LEFT JOIN scans s ON s.officer_id = o.id
-           GROUP BY o.id ORDER BY scans DESC"""))
-    conn.close()
-    return {"officers": rows}
+    return {"officers": db.get_officers()}
 
 
 @app.post("/api/dashboard/officers")
@@ -395,18 +380,14 @@ def api_officer_add(payload: dict, _sup: dict = Depends(require_roles("superviso
     officer_id = str(payload.get("id", "")).strip()
     if not officer_id:
         return {"error": "Officer ID is required"}
-    db.upsert_officer(officer_id, str(payload.get("name", "")).strip() or officer_id,
-                      str(payload.get("dept", "") or "Legal Metrology Department"))
+    db.add_officer(officer_id, str(payload.get("name", "")).strip() or officer_id,
+                    str(payload.get("dept", "") or "Legal Metrology Department"))
     return {"status": "ok"}
 
 
 @app.delete("/api/dashboard/officers/{officer_id}")
 def api_officer_remove(officer_id: str, _sup: dict = Depends(require_roles("supervisor"))):
-    conn = db._connect()
-    conn.execute("DELETE FROM officers WHERE id = ?", (officer_id,))
-    conn.execute("UPDATE scans SET officer_id = NULL WHERE officer_id = ?", (officer_id,))
-    conn.commit()
-    conn.close()
+    db.remove_officer(officer_id)
     return {"status": "ok"}
 
 
