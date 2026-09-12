@@ -87,19 +87,24 @@ def api_login(payload: dict):
     role = str(payload.get("role", "")).strip()
     user_id = str(payload.get("id", "")).strip()
     secret = str(payload.get("secret", ""))
-    if role == "officer":
-        identity = db.verify_officer(user_id, secret)
-        if not identity:
-            raise HTTPException(status_code=401, detail="Officer ID and name do not match our records")
-    elif role == "supervisor":
-        row = db.verify_supervisor(user_id, secret)
-        if not row:
-            raise HTTPException(status_code=401, detail="Supervisor ID or password is incorrect")
-        identity = row
-    else:
-        raise HTTPException(status_code=400, detail="Unknown role")
-    token = db.create_session(identity["id"], role)
-    return {"status": "ok", "token": token, "role": role, **identity}
+    try:
+        if role == "officer":
+            identity = db.verify_officer(user_id, secret)
+            if not identity:
+                raise HTTPException(status_code=401, detail="Officer ID and name do not match our records")
+        elif role == "supervisor":
+            row = db.verify_supervisor(user_id, secret)
+            if not row:
+                raise HTTPException(status_code=401, detail="Supervisor ID or password is incorrect")
+            identity = row
+        else:
+            raise HTTPException(status_code=400, detail="Unknown role")
+        token = db.create_session(identity["id"], role)
+        return {"status": "ok", "token": token, "role": role, **identity}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Database unreachable — allow 0.0.0.0/0 in Atlas Network Access and redeploy. ({exc.__class__.__name__})")
 
 @app.get("/api/auth/me")
 def api_me(sess: dict = Depends(session_from_header)):
