@@ -26,8 +26,10 @@ def preprocess_image(image: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float]:
     # Step 1: normalize size.
     # Dense legal-declaration print is tiny; OCR needs pixels. Target
     # longest side ~1600px: upscale small images, downscale huge ones.
-    max_dim = 2880
-    min_dim = 1600
+    import os
+    free = os.getenv("OCR_FREE_TIER") == "1"
+    max_dim = 1280 if free else 2880
+    min_dim = 960 if free else 1600
     scale = 1.0
     processed = original.copy()
     longest = max(h, w)
@@ -35,14 +37,14 @@ def preprocess_image(image: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float]:
         scale = max_dim / longest
         new_w, new_h = int(w * scale), int(h * scale)
         processed = cv2.resize(processed, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        logger.info(f"Downscaled image from {w}x{h} to {new_w}x{new_h} (scale={scale:.3f})")
+        logger.info(f"Downscaled image from {w}x{h} to {new_w}x{new_h} (scale={scale:.3f}) free_tier={free}")
     elif longest < min_dim:
         scale = min_dim / longest
-        # cap upscale at 2.5x to avoid huge blurry images
-        scale = min(scale, 2.5)
+        # cap upscale at 2.5x to avoid huge blurry images (smaller cap on free to save RAM)
+        scale = min(scale, 1.8 if free else 2.5)
         new_w, new_h = int(w * scale), int(h * scale)
         processed = cv2.resize(processed, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
-        logger.info(f"Upscaled image from {w}x{h} to {new_w}x{new_h} (scale={scale:.3f})")
+        logger.info(f"Upscaled image from {w}x{h} to {new_w}x{new_h} (scale={scale:.3f}) free_tier={free}")
 
     # Step 2: mild denoise only (preserve edges/text).
     # fastNlMeans on color is slow; use small bilateral filter.
