@@ -25,10 +25,22 @@ except Exception:
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/files", StaticFiles(directory=str(RUN_DIR)), name="files")
 
-db.init_db()
-db.backfill_runs()
-if db.ensure_default_supervisor():
-    print(f"[auth] default supervisor login: SUP001 / admin123  (change after first login)")
+# DB is lazy — don't crash Render startup if Atlas is temporarily unreachable / IP not whitelisted.
+# First request will retry.
+try:
+    db.init_db()
+    db.backfill_runs()
+    if db.ensure_default_supervisor():
+        print(f"[auth] default supervisor login: SUP001 / admin123  (change after first login)")
+except Exception as _e:
+    print(f"[db] Atlas not reachable at startup (will retry on first request): {_e}")
+
+@app.on_event("startup")
+def _db_startup():
+    try:
+        db.init_db()
+    except Exception as e:
+        print(f"[db] startup retry failed: {e}")
 
 SUPERVISE_DIR = STATIC_DIR / "supervise"
 
