@@ -28,8 +28,8 @@ def preprocess_image(image: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float]:
     # longest side ~1600px: upscale small images, downscale huge ones.
     import os
     free = os.getenv("OCR_FREE_TIER") == "1"
-    max_dim = 1280 if free else 2880
-    min_dim = 960 if free else 1600
+    max_dim = 1024 if free else 2880
+    min_dim = 800 if free else 1600
     scale = 1.0
     processed = original.copy()
     longest = max(h, w)
