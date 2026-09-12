@@ -11,3 +11,4 @@ rapidocr_onnxruntime>=1.4,<2
 onnxruntime>=1.17,<2
 pymongo>=4.18,<5
 cloudinary>=1.44,<2
+certifi>=2024,<2027

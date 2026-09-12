@@ -17,7 +17,13 @@ _mongo_db: Optional = None
 def _client() -> MongoClient:
     global _mongo_client, _mongo_db
     if _mongo_client is None:
-        _mongo_client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+        import certifi
+        _mongo_client = MongoClient(
+            MONGODB_URI,
+            serverSelectionTimeoutMS=10000,
+            tlsCAFile=certifi.where(),
+            retryWrites=True,
+        )
         _mongo_db = _mongo_client[MONGODB_DB_NAME]
         _ensure_indexes()
     return _mongo_client
