@@ -68,6 +68,9 @@ annotator = get_annotator()
 async def _prewarm_paddle():
     # On Render free, first POST would otherwise download 16MB + init Paddle inside the 30s request window and 502.
     # Warm in background on deploy so the first officer scan is ~5s, not 30s+timeout. Fits 512MB because FREE_TIER uses single variant + 1280px cap.
+    if FREE_TIER:
+        logger.info("Free tier: skipping Paddle pre-warm (RapidONNX only, ~80MB)")
+        return
     if os.getenv("OCR_PREWARM", "1") == "1":
         try:
             logger.info("Pre-warming PaddleOCR in background (download once, cached at /opt/render/.paddleocr)")
@@ -113,22 +116,34 @@ async def _ocr_single_image(original: np.ndarray, tag: str, processing_steps: Li
 
     ocr_groups: List[List[dict]] = []
     ocr_errors = []
-    for variant_name, variant_image, scale in ocr_variants:
+    if FREE_TIER:
+        # Free 512MB: RapidONNX only (~80MB) — Paddle alone needs 300MB+ and 502s on Render free even with single variant.
         try:
-            variant_results = await asyncio.to_thread(ocr_engine.detect_text, variant_image)
-            if scale != 1.0 and variant_results:
-                variant_results = scale_bboxes_to_original(variant_results, scale)
-            for item in variant_results:
-                item["source_variant"] = variant_name
-            ocr_groups.append(variant_results)
-            processing_steps.append(f"[{tag}] {variant_name}: {len(variant_results)} text regions")
+            _, enhanced_img, enhanced_scale = ocr_variants[0]
+            rapid_results = await asyncio.to_thread(rapid_engine.detect_text, enhanced_img)
+            if enhanced_scale != 1.0 and rapid_results:
+                rapid_results = scale_bboxes_to_original(rapid_results, enhanced_scale)
+            for item in rapid_results:
+                item["source_variant"] = "rapid"
+            ocr_groups.append(rapid_results)
+            processing_steps.append(f"[{tag}] rapid: {len(rapid_results)} text regions")
         except Exception as exc:
-            message = f"[{tag}] {variant_name}: OCR failed ({exc})"
-            ocr_errors.append(message)
-            processing_steps.append(message)
-            logger.warning(message)
-
-    if not FREE_TIER:
+            logger.warning(f"[{tag}] RapidOCR variant failed: {exc}")
+    else:
+        for variant_name, variant_image, scale in ocr_variants:
+            try:
+                variant_results = await asyncio.to_thread(ocr_engine.detect_text, variant_image)
+                if scale != 1.0 and variant_results:
+                    variant_results = scale_bboxes_to_original(variant_results, scale)
+                for item in variant_results:
+                    item["source_variant"] = variant_name
+                ocr_groups.append(variant_results)
+                processing_steps.append(f"[{tag}] {variant_name}: {len(variant_results)} text regions")
+            except Exception as exc:
+                message = f"[{tag}] {variant_name}: OCR failed ({exc})"
+                ocr_errors.append(message)
+                processing_steps.append(message)
+                logger.warning(message)
         try:
             _, enhanced_img, enhanced_scale = ocr_variants[0]
             rapid_results = await asyncio.to_thread(rapid_engine.detect_text, enhanced_img)
