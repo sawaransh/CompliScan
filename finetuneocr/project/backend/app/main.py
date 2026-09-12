@@ -64,6 +64,18 @@ field_extractor = get_field_extractor()
 rule_engine = get_rule_engine()
 annotator = get_annotator()
 
+@app.on_event("startup")
+async def _prewarm_paddle():
+    # On Render free, first POST would otherwise download 16MB + init Paddle inside the 30s request window and 502.
+    # Warm in background on deploy so the first officer scan is ~5s, not 30s+timeout. Fits 512MB because FREE_TIER uses single variant + 1280px cap.
+    if os.getenv("OCR_PREWARM", "1") == "1":
+        try:
+            logger.info("Pre-warming PaddleOCR in background (download once, cached at /opt/render/.paddleocr)")
+            await asyncio.to_thread(ocr_engine._ensure_ocr)
+            logger.info("PaddleOCR pre-warm complete")
+        except Exception as e:
+            logger.warning(f"Paddle pre-warm skipped: {e}")
+
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
