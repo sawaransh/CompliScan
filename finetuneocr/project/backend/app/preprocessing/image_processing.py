@@ -73,7 +73,12 @@ def build_ocr_variants(image: np.ndarray) -> Tuple[np.ndarray, List[Tuple[str, n
     Returns:
         original image and a list of (variant_name, variant_image, scale).
     """
+    import os
+    FREE_TIER = os.getenv("OCR_FREE_TIER") == "1"
     original, enhanced, scale = preprocess_image(image)
+    if FREE_TIER:
+        # Free 512MB: single variant keeps Paddle at ~300MB instead of 600MB for 5 variants.
+        return original, [("enhanced", enhanced, scale)]
     variants: List[Tuple[str, np.ndarray, float]] = [
         ("enhanced", enhanced, scale),
         ("original", original, 1.0),

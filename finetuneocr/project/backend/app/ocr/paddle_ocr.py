@@ -113,15 +113,17 @@ class PaddleOCREngine:
         # - higher limit side so downscaling doesn't erase small print
         # - lower drop_score so weak recognitions are kept (rule engine
         #   decides PASS vs REVIEW, not the OCR layer)
+        import os
+        free = os.getenv("OCR_FREE_TIER") == "1"
         try:
             self.ocr = PaddleOCR(
-                use_angle_cls=self.use_angle_cls,
+                use_angle_cls=False if free else self.use_angle_cls,
                 lang=self.lang,
                 show_log=False,
                 det_db_thresh=0.3,
                 det_db_box_thresh=0.4,
                 det_db_unclip_ratio=2.0,
-                det_limit_side_len=2880,
+                det_limit_side_len=1600 if free else 2880,
                 det_limit_type='max',
                 drop_score=0.3,
             )

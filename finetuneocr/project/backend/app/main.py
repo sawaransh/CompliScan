@@ -21,6 +21,8 @@ from app.extraction.field_extractor import get_field_extractor
 from app.compliance.rule_engine import get_rule_engine
 from app.evidence.annotator import get_annotator, encode_image_to_base64 as annotator_encode
 
+import os
+FREE_TIER = os.getenv("OCR_FREE_TIER") == "1"
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_IMAGES = 5
 
@@ -114,40 +116,42 @@ async def _ocr_single_image(original: np.ndarray, tag: str, processing_steps: Li
             processing_steps.append(message)
             logger.warning(message)
 
-    try:
-        _, enhanced_img, enhanced_scale = ocr_variants[0]
-        rapid_results = await asyncio.to_thread(rapid_engine.detect_text, enhanced_img)
-        if enhanced_scale != 1.0 and rapid_results:
-            rapid_results = scale_bboxes_to_original(rapid_results, enhanced_scale)
-        for item in rapid_results:
-            item["source_variant"] = "rapid"
-        ocr_groups.append(rapid_results)
-        processing_steps.append(f"[{tag}] rapid: {len(rapid_results)} text regions")
-    except Exception as exc:
-        logger.warning(f"[{tag}] RapidOCR variant failed: {exc}")
+    if not FREE_TIER:
+        try:
+            _, enhanced_img, enhanced_scale = ocr_variants[0]
+            rapid_results = await asyncio.to_thread(rapid_engine.detect_text, enhanced_img)
+            if enhanced_scale != 1.0 and rapid_results:
+                rapid_results = scale_bboxes_to_original(rapid_results, enhanced_scale)
+            for item in rapid_results:
+                item["source_variant"] = "rapid"
+            ocr_groups.append(rapid_results)
+            processing_steps.append(f"[{tag}] rapid: {len(rapid_results)} text regions")
+        except Exception as exc:
+            logger.warning(f"[{tag}] RapidOCR variant failed: {exc}")
 
     ocr_results = merge_ocr_results(*ocr_groups) if ocr_groups else []
     quality = assess_quality(original, ocr_results)
 
-    readable = [r for r in ocr_results if r.get("text", "").strip()]
-    if len(readable) < 3 or quality.get("suspicious_layout"):
-        for code, label in ((cv2.ROTATE_90_CLOCKWISE, "rot90"),
-                            (cv2.ROTATE_180, "rot180"),
-                            (cv2.ROTATE_90_COUNTERCLOCKWISE, "rot270")):
-            try:
-                rotated = cv2.rotate(original, code)
-                rot_results = await asyncio.to_thread(ocr_engine.detect_text, rotated)
-                rot_readable = [r for r in rot_results if r.get("text", "").strip()]
-                if len(rot_readable) > len(readable):
-                    for item in rot_results:
-                        item["bbox"] = _unrotate_box(item["bbox"], w0, h0, code)
-                        item["source_variant"] = label
-                    ocr_results = rot_results
-                    quality = assess_quality(original, ocr_results)
-                    processing_steps.append(f"[{tag}] {label}: recovered {len(rot_results)} regions (replaced bad pass)")
-                    break
-            except Exception as exc:
-                logger.warning(f"[{tag}] Rotation pass {label} failed: {exc}")
+    if not FREE_TIER:
+        readable = [r for r in ocr_results if r.get("text", "").strip()]
+        if len(readable) < 3 or quality.get("suspicious_layout"):
+            for code, label in ((cv2.ROTATE_90_CLOCKWISE, "rot90"),
+                                (cv2.ROTATE_180, "rot180"),
+                                (cv2.ROTATE_90_COUNTERCLOCKWISE, "rot270")):
+                try:
+                    rotated = cv2.rotate(original, code)
+                    rot_results = await asyncio.to_thread(ocr_engine.detect_text, rotated)
+                    rot_readable = [r for r in rot_results if r.get("text", "").strip()]
+                    if len(rot_readable) > len(readable):
+                        for item in rot_results:
+                            item["bbox"] = _unrotate_box(item["bbox"], w0, h0, code)
+                            item["source_variant"] = label
+                        ocr_results = rot_results
+                        quality = assess_quality(original, ocr_results)
+                        processing_steps.append(f"[{tag}] {label}: recovered {len(rot_results)} regions (replaced bad pass)")
+                        break
+                except Exception as exc:
+                    logger.warning(f"[{tag}] Rotation pass {label} failed: {exc}")
     processing_steps.append(f"[{tag}] merged OCR: {len(ocr_results)} unique text regions")
     return ocr_results, quality, ocr_errors
 
