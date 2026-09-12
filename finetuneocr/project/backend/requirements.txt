@@ -1,6 +1,7 @@
 fastapi==0.109.0
 uvicorn==0.27.0
 python-multipart==0.0.6
+paddlepaddle==2.6.2
 paddleocr==2.7.3
 rapidocr_onnxruntime==1.4.4
 onnxruntime
